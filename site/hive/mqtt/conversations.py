@@ -7,11 +7,24 @@ import random
 import re
 import traceback
 from django.template import Template, Context
-from .ai_factory import create_openai
+from .ai_factory import (
+    PROVIDER_MUSE_SPARK,
+    PROVIDER_OPENAI,
+    create_muse_spark,
+    create_openai,
+    has_muse_spark_key,
+    normalize_provider,
+    resolve_chat_provider,
+)
 from ..models import SinglePromptChat
 from .volley import Volley
 
 logger = logging.getLogger(__name__)
+
+# Muse Spark is a reasoning model; "low" keeps spoken-turn latency down.
+# Single named constant so the assumed value can change in one place.
+MUSE_SPARK_REASONING_EFFORT = "low"
+FALLBACK_SPEECH = "Oh no.  I have run into a bug"
 
 def _normalize_model(model):
     return (model or "").strip().lower()
@@ -52,6 +65,34 @@ def completion_options(model, max_tokens, temperature):
     else:
         opts["reasoning_effort"] = "low"
     return opts
+
+
+def completion_options_for_provider(provider, model, max_tokens, temperature):
+    """Provider-aware Chat Completions kwargs.
+
+    OpenAI delegates to :func:`completion_options` unchanged (GPT regression
+    gate). Muse Spark always uses ``max_completion_tokens`` (never
+    ``max_tokens``), omits ``temperature`` entirely, and sends
+    ``reasoning_effort`` ``"low"`` for spoken-turn latency.
+    """
+    if normalize_provider(provider) == PROVIDER_MUSE_SPARK:
+        return {
+            "max_completion_tokens": max_tokens,
+            "reasoning_effort": MUSE_SPARK_REASONING_EFFORT,
+        }
+    return completion_options(model, max_tokens, temperature)
+
+
+def create_chat_client(provider):
+    """Chat client for ``provider``, dispatched through module-level factories.
+
+    Mirrors ``ai_factory.create_chat_client``; dispatching through this
+    module's ``create_openai``/``create_muse_spark`` names keeps the existing
+    offline-test patch seam (``hive.mqtt.conversations.create_openai``) valid.
+    """
+    if normalize_provider(provider) == PROVIDER_MUSE_SPARK:
+        return create_muse_spark()
+    return create_openai()
 
 
 _DEFAULT_SUMMARY_PROMPT = "Summarize the following conversation between the friendly robot Moxie, and the user.  Keep the summary brief, but include any important details."
@@ -141,11 +182,13 @@ class SingleContextChatSession(ChatSession):
                  model="gpt-6-luna",
                  max_tokens=70,
                  temperature=0.5,
-                 exit_line="Well, that was fun.  Let's move on."
+                 exit_line="Well, that was fun.  Let's move on.",
+                 provider=PROVIDER_OPENAI
                  ):
         super().__init__(max_history)
-        self._max_volleys = max_volleys        
-        self._context = [ { "role": "system", 
+        self._max_volleys = max_volleys
+        self._provider = normalize_provider(provider)
+        self._context = [ { "role": "system",
             "content": prompt
             } ]
         self._opener = opener
@@ -153,6 +196,11 @@ class SingleContextChatSession(ChatSession):
         self._max_tokens = max_tokens
         self._temperature = temperature
         self._exit_line = exit_line
+        model_name = _normalize_model(model)
+        if self._provider == PROVIDER_MUSE_SPARK and (model_name.startswith("gpt-") or re.match(r"^o[1-9]", model_name)):
+            logger.warning("Chat provider is Muse Spark but model %r looks like an OpenAI model", model)
+        elif self._provider == PROVIDER_OPENAI and model_name.startswith("muse-spark"):
+            logger.warning("Chat provider is OpenAI but model %r looks like a Muse Spark model", model)
         self._auto_history = False
         self._pre_filter = None
         self._post_filter = None
@@ -165,6 +213,10 @@ class SingleContextChatSession(ChatSession):
         self._post_filter = post_filter
         self._complete_handler = complete_handler
         self._notify_handler = notify_handler
+
+    @property
+    def provider(self):
+        return self._provider
 
     # For web-based, we have no Moxie and no Notify channel, so auto-history is used
     def set_auto_history(self, val):
@@ -236,16 +288,20 @@ class SingleContextChatSession(ChatSession):
             # clone, add new input, official history comes from notify
             history = copy.deepcopy(self._history)
             self.add_history('user', speech, history)
-        try:
-            client = create_openai()
-            resp = client.chat.completions.create(
-                        model=self._model,
-                        messages=context + history,
-                        **completion_options(self._model, self._max_tokens, self._temperature)
-                    ).choices[0].message.content
-        except Exception as e:
-            logger.warning(f'Exception attempting inference: {e}')
-            resp = "Oh no.  I have run into a bug"
+        if self._provider == PROVIDER_MUSE_SPARK and not has_muse_spark_key():
+            logger.error("Muse Spark selected but no Muse Spark API key is configured (model=%s)", self._model)
+            resp = FALLBACK_SPEECH
+        else:
+            try:
+                client = create_chat_client(self._provider)
+                resp = client.chat.completions.create(
+                            model=self._model,
+                            messages=context + history,
+                            **completion_options_for_provider(self._provider, self._model, self._max_tokens, self._temperature)
+                        ).choices[0].message.content
+            except Exception as e:
+                logger.warning(f'Exception attempting inference: {e}')
+                resp = FALLBACK_SPEECH
         if of:
             resp += " " + self._exit_line
         if self._auto_history:
@@ -267,7 +323,10 @@ class SingleContextChatSession(ChatSession):
                 model = self._model
             if not max_tokens:
                 max_tokens = self._max_tokens
-            client = create_openai()
+            if self._provider == PROVIDER_MUSE_SPARK and not has_muse_spark_key():
+                logger.error("Muse Spark selected but no Muse Spark API key is configured (model=%s)", model)
+                return "Error summarizing chat: Muse Spark selected but no Muse Spark API key is configured."
+            client = create_chat_client(self._provider)
             prompt = prompt_base if prompt_base else _DEFAULT_SUMMARY_PROMPT
             if append_transcript:
                 # Concatenate the chat history into a single string
@@ -280,7 +339,7 @@ class SingleContextChatSession(ChatSession):
             resp = client.chat.completions.create(
                     model=model,
                     messages=msgs,
-                    **completion_options(model, max_tokens, self._temperature)
+                    **completion_options_for_provider(self._provider, model, max_tokens, self._temperature)
                     ).choices[0].message.content
             return resp
         except Exception as e:
@@ -303,7 +362,7 @@ class SingleContextChatSession(ChatSession):
 class SinglePromptDBChatSession(SingleContextChatSession):
     def __init__(self, pk):
         source = SinglePromptChat.objects.get(pk=pk)
-        super().__init__(max_history=source.max_history, max_volleys=source.max_volleys, model=source.model, prompt=source.prompt, opener=source.opener, max_tokens=source.max_tokens, temperature=source.temperature)
+        super().__init__(max_history=source.max_history, max_volleys=source.max_volleys, model=source.model, prompt=source.prompt, opener=source.opener, max_tokens=source.max_tokens, temperature=source.temperature, provider=resolve_chat_provider(vendor=source.vendor))
         if source.code:
             try:
                 loc = locals()

@@ -57,6 +57,32 @@
       <div id="apiHelp" class="form-text text-light">This be be stored in your local database and used locally for AI and Speech services.</div>
     </div>
     <div class="mb-3">
+      <label for="chat_provider" class="form-label fw-bold fs-5">Chat Provider</label>
+      <select class="form-control" name="chat_provider" id="chat_provider" aria-describedby="chatProviderHelp">
+        <option value="openai"{% if not object.chat_provider or object.chat_provider == 'openai' %} selected{% endif %}>GPT (OpenAI) — default</option>
+        <option value="muse_spark"{% if object.chat_provider == 'muse_spark' %} selected{% endif %}>Muse Spark (Meta)</option>
+      </select>
+      <div id="chatProviderHelp" class="form-text text-light">Applies to new chat sessions. GPT remains the default; Muse Spark is opt-in. Speech-to-Text (Whisper) always uses the OpenAI key.</div>
+    </div>
+    <div class="mb-3">
+      <label for="musesparkapikey" class="form-label fw-bold fs-5">(OPTIONAL) Muse Spark API Key</label>
+      <input type="password" autocomplete="off" class="form-control" name="musesparkapikey" id="musesparkapikey" aria-describedby="museSparkApiHelp" placeholder="{% if object.muse_spark_api_key %}[Key exists and will be kept unless overridden.]{% else %}Paste Muse Spark API key.{% endif %}">
+      <div id="museSparkApiHelp" class="form-text text-light">Stored in your local database, used only on this computer for chat. Never sent to the robot.</div>
+    </div>
+    <div class="mb-3">
+      <label for="muse_spark_model" class="form-label fw-bold fs-5">Muse Spark Model</label>
+      <select class="form-control" name="muse_spark_model" id="muse_spark_model" aria-describedby="museSparkModelHelp">
+        <option value="muse-spark-1.3"{% if not object.muse_spark_model or object.muse_spark_model == 'muse-spark-1.3' %} selected{% endif %}>muse-spark-1.3 (standard)</option>
+        <option value="muse-spark-1.3-contributor"{% if object.muse_spark_model == 'muse-spark-1.3-contributor' %} selected{% endif %}>muse-spark-1.3-contributor</option>
+      </select>
+      <div id="museSparkModelHelp" class="form-text text-light">The contributor variant operates under different data-use terms than the standard Muse Spark model, so conversation content sent to it is handled under those contributor terms rather than the standard terms — stay on muse-spark-1.3 (or GPT) unless you have read and accepted the contributor terms.</div>
+    </div>
+    <div class="mb-3 form-text text-light" id="provider_status">
+      OpenAI: {% if object.openai_api_key %}key configured{% else %}key not configured{% endif %} ·
+      Muse Spark: {% if object.muse_spark_api_key %}key configured{% else %}key not configured{% endif %} ·
+      STT (Whisper): uses the OpenAI key
+    </div>
+    <div class="mb-3">
       <label for="googleapikey" class="form-label fw-bold fs-5">(OPTIONAL) Google Service Account Key</label>
       <input type="text" class="form-control" name="googleapikey" id="googleapikey" aria-describedby="googleapiHelp" placeholder="{% if object.google_api_key %}[Key exists and will be kept unless overridden.]{% else %}Paste Google Service Account key.{% endif %}">
       <div id="googleapiHelp" class="form-text text-light">
@@ -128,6 +154,15 @@ $(document).ready(function() {
     if (googleApiKey !== '' && !isValidJSON(googleApiKey)) {
       err_msg += '\n-Google API Key must be a valid JSON string';
       validated = false;
+    }
+    var chatProvider = $('#chat_provider').val();
+    var museSparkKey = $('#musesparkapikey').val().trim();
+    var museSparkKeyStored = {% if object.muse_spark_api_key %}true{% else %}false{% endif %};
+    if (validated && chatProvider === 'muse_spark' && museSparkKey === '' && !museSparkKeyStored) {
+      if (!confirm('Muse Spark is selected but no Muse Spark key is set — chat will speak an error until a key is added. Save anyway?')) {
+        event.preventDefault();
+        return;
+      }
     }
 
     if (!validated) {

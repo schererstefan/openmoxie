@@ -10,7 +10,8 @@ import logging
 import base64
 import ssl
 import threading
-from .ai_factory import set_openai_key
+from .ai_factory import set_global_chat_provider, set_muse_spark_key, set_openai_key
+from .control_commands import behaviour_tree_mark
 from .robot_credentials import RobotCredentials
 from .robot_data import RobotData
 from .moxie_remote_chat import RemoteChat
@@ -431,6 +432,17 @@ class MoxieServer:
         tmsg = { "action": "INTERRUPT" }
         self.send_telehealth(device_id, tmsg)
 
+    # Send Telehealth - PLAY a single allowlisted behaviour-tree (gesture/look).
+    # Same telehealth topic/payload shape as speech; markup holds only the
+    # behaviour-tree mark (plus the spoken text when speech is supplied).
+    # Callers must allowlist-validate `behaviour` (see control_commands).
+    def send_telehealth_behaviour(self, device_id, behaviour, speech="", duration=1.0):
+        mark = behaviour_tree_mark(behaviour, duration=duration)
+        text = speech or ""
+        markup = mark + text if text else mark
+        tmsg = { "action": "PLAY_OUTPUT", "output": { "text": text, "markup": markup } }
+        self.send_telehealth(device_id, tmsg)
+
     def long_topic(self, topic_name):
         return "/devices/" + self._robot.device_id + "/events/" + topic_name
 
@@ -479,6 +491,8 @@ class MoxieServer:
     def update_from_database(self):
         hive_config = HiveConfiguration.objects.filter(name="default").first()
         set_openai_key(hive_config.openai_api_key if hive_config else None)
+        set_muse_spark_key(getattr(hive_config, "muse_spark_api_key", None) if hive_config else None)
+        set_global_chat_provider(getattr(hive_config, "chat_provider", "openai") if hive_config else "openai")
         self._google_service_account = hive_config.google_api_key if hive_config else None
         self._remote_chat.update_from_database()
 

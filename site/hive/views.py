@@ -13,10 +13,25 @@ import qrcode
 from PIL import Image
 from io import BytesIO
 
-from .models import GlobalResponse, SinglePromptChat, MoxieDevice, MoxieSchedule, HiveConfiguration, MentorBehavior
+from .models import CHAT_PROVIDER_MUSE_SPARK, CHAT_PROVIDER_OPENAI, MUSE_SPARK_MODELS, GlobalResponse, SinglePromptChat, MoxieDevice, MoxieSchedule, HiveConfiguration, MentorBehavior
 from .content.data import DM_MISSION_CONTENT_IDS, get_moxie_customization_groups
 from .data_import import update_import_status, import_content
 from .mqtt.moxie_server import get_instance
+from .mqtt.control_commands import (
+    CONTROL_COMMANDS,
+    DANCE_MODULE_ID,
+    DEFAULT_LOOK_BEHAVIOUR,
+    GESTURE_BEHAVIOURS,
+    LOOK_BEHAVIOURS,
+    build_dance_payload,
+    build_sleep_payload,
+    is_dance_enabled,
+    parse_duration,
+    parse_single_command,
+    phonetic_name,
+    validate_intensity,
+    validate_mood,
+)
 from .mqtt.robot_data import DEFAULT_ROBOT_CONFIG, DEFAULT_ROBOT_SETTINGS
 from .mqtt.volley import Volley
 import json
@@ -57,6 +72,16 @@ def hive_configure(request):
     if google:
         # Moxie likes compact json, so rewrite json input to be safe
         cfg.google_api_key = json.dumps(json.loads(google))
+    # Optional Muse Spark chat provider (additive; blank key means keep).
+    chat_provider = request.POST.get('chat_provider')
+    if chat_provider in (CHAT_PROVIDER_OPENAI, CHAT_PROVIDER_MUSE_SPARK):
+        cfg.chat_provider = chat_provider
+    muse_spark_key = request.POST.get('musesparkapikey')
+    if muse_spark_key:
+        cfg.muse_spark_api_key = muse_spark_key
+    muse_spark_model = request.POST.get('muse_spark_model')
+    if muse_spark_model in MUSE_SPARK_MODELS:
+        cfg.muse_spark_model = muse_spark_model
     cfg.external_host = request.POST['hostname']
     cfg.allow_unverified_bots = request.POST.get('allowall') == "on"
     # Bootstrap any default data if not present
@@ -242,24 +267,33 @@ class MoxiePuppetView(generic.DetailView):
     template_name = "hive/puppet.html"
     model = MoxieDevice
 
-# PUPPET API - Handle AJAX calls from puppet view
+# PUPPET API - Handle AJAX calls from puppet view (+ Full Control commands).
+# Exactly one command per POST. Movement class (gesture/dance/look/sleep) is
+# at most one per call by construction: parse_single_command rejects any
+# bundled/list command shape. New commands return {'result', 'command', ...};
+# existing enable/disable/interrupt/speak keep {'result': True}.
 @csrf_exempt
 def puppet_api(request, pk):
     try:
         device = MoxieDevice.objects.get(pk=pk)
         if request.method == 'GET':
-            # Handle GET request
-            result = { 
+            # Handle GET request (status; no state change, no publish)
+            result = {
                 "online": get_instance().robot_data().device_online(device.device_id),
                 "puppet_state": get_instance().robot_data().get_puppet_state(device.device_id),
-                "puppet_enabled": device.robot_config.get("moxie_mode") == "TELEHEALTH" if device.robot_config else False
+                "puppet_enabled": device.robot_config.get("moxie_mode") == "TELEHEALTH" if device.robot_config else False,
+                "dance_enabled": is_dance_enabled(),
+                "control_commands": list(CONTROL_COMMANDS),
             }
             return JsonResponse(result)
         elif request.method == 'POST':
             # Handle COMMANDS request
             if not device.robot_config:
                 device.robot_config = {}
-            cmd = request.POST['command']
+            try:
+                cmd = parse_single_command(request.POST.get('command'), request.POST.keys())
+            except ValueError as e:
+                return JsonResponse({'result': False, 'error': str(e)}, status=400)
             if cmd == "enable":
                 device.robot_config["moxie_mode"] = "TELEHEALTH"
                 device.save()
@@ -271,8 +305,49 @@ def puppet_api(request, pk):
             elif cmd == "interrupt":
                 get_instance().send_telehealth_interrupt(device.device_id)
             elif cmd == "speak":
-                get_instance().send_telehealth_speech(device.device_id, request.POST['speech'], 
-                                                      request.POST['mood'], float(request.POST['intensity']))
+                speech = request.POST.get('speech', '')
+                if not speech:
+                    return JsonResponse({'result': False, 'error': 'speech is required'}, status=400)
+                try:
+                    mood = validate_mood(request.POST.get('mood'))
+                    intensity = validate_intensity(request.POST.get('intensity'))
+                except ValueError as e:
+                    return JsonResponse({'result': False, 'error': str(e)}, status=400)
+                get_instance().send_telehealth_speech(device.device_id, phonetic_name(speech),
+                                                      mood, intensity)
+            elif cmd in ("gesture", "look"):
+                behaviour = (request.POST.get('behaviour') or '').strip()
+                if cmd == "gesture" and behaviour not in GESTURE_BEHAVIOURS:
+                    return JsonResponse({'result': False, 'command': cmd, 'error': 'behaviour not allowlisted'}, status=400)
+                if cmd == "look":
+                    behaviour = behaviour or DEFAULT_LOOK_BEHAVIOUR
+                    if behaviour not in LOOK_BEHAVIOURS:
+                        return JsonResponse({'result': False, 'command': cmd, 'error': 'behaviour not allowlisted'}, status=400)
+                try:
+                    duration = parse_duration(request.POST.get('duration'))
+                except ValueError as e:
+                    return JsonResponse({'result': False, 'command': cmd, 'error': str(e)}, status=400)
+                spoken = phonetic_name(request.POST.get('speech') or '')
+                logger.info("Control %s behaviour=%s device=%s", cmd, behaviour, device.device_id)
+                get_instance().send_telehealth_behaviour(device.device_id, behaviour, speech=spoken, duration=duration)
+                return JsonResponse({'result': True, 'command': cmd, 'behaviour': behaviour})
+            elif cmd == "dance":
+                try:
+                    payload = build_dance_payload(module_id=request.POST.get('module_id'))
+                except ValueError as e:
+                    return JsonResponse({'result': False, 'command': cmd, 'error': str(e)}, status=400)
+                logger.info("Control dance module=%s device=%s", DANCE_MODULE_ID, device.device_id)
+                get_instance().send_command_to_bot_json(device.device_id, 'remote_chat', payload)
+                return JsonResponse({'result': True, 'command': cmd, 'module_id': DANCE_MODULE_ID})
+            elif cmd == "sleep":
+                logger.info("Control sleep device=%s", device.device_id)
+                get_instance().send_command_to_bot_json(device.device_id, 'remote_chat', build_sleep_payload())
+                return JsonResponse({'result': True, 'command': cmd})
+            elif cmd == "wake":
+                ok = get_instance().send_wakeup_to_bot(device.device_id)
+                return JsonResponse({'result': bool(ok), 'command': cmd})
+            else:
+                return JsonResponse({'result': False, 'error': f'unknown command: {cmd}'}, status=400)
         return JsonResponse({'result': True})
     except MoxieDevice.DoesNotExist as e:
         logger.warning("Moxie puppet speak for unfound pk {pk}")

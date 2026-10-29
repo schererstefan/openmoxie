@@ -5,6 +5,23 @@ from django.core.exceptions import ValidationError
 
 class AIVendor(Enum):
     OPEN_AI = 1
+    MUSE_SPARK = 2
+
+# Global chat provider choices. Values mirror hive.mqtt.ai_factory
+# PROVIDER_OPENAI / PROVIDER_MUSE_SPARK; GPT (openai) is always the default.
+CHAT_PROVIDER_OPENAI = "openai"
+CHAT_PROVIDER_MUSE_SPARK = "muse_spark"
+CHAT_PROVIDER_CHOICES = [
+    (CHAT_PROVIDER_OPENAI, "GPT (OpenAI)"),
+    (CHAT_PROVIDER_MUSE_SPARK, "Muse Spark (Meta)"),
+]
+
+# Muse Spark model offered by the setup page. The standard model is the
+# default; the contributor variant is an explicit, non-default choice only
+# (its conversation content is handled under different data-use terms).
+MUSE_SPARK_MODEL_STANDARD = "muse-spark-1.3"
+MUSE_SPARK_MODEL_CONTRIBUTOR = "muse-spark-1.3-contributor"
+MUSE_SPARK_MODELS = (MUSE_SPARK_MODEL_STANDARD, MUSE_SPARK_MODEL_CONTRIBUTOR)
 
 class SinglePromptChat(models.Model):
     name = models.CharField(max_length=200)
@@ -68,6 +85,13 @@ class MoxieLogs(models.Model):
 class HiveConfiguration(models.Model):
     name = models.CharField(max_length=200)
     openai_api_key = models.TextField(null=True, blank=True, default='')
+    # Muse Spark is an optional, opt-in *chat* provider; GPT stays default.
+    # Storage deliberately matches openai_api_key exactly (nullable plaintext
+    # in the local SQLite database). Storage mechanics are intentionally not
+    # changed by the Muse Spark work; see the setup-page LAN warning.
+    chat_provider = models.CharField(max_length=32, choices=CHAT_PROVIDER_CHOICES, default=CHAT_PROVIDER_OPENAI)
+    muse_spark_api_key = models.TextField(null=True, blank=True, default='')
+    muse_spark_model = models.CharField(max_length=200, default=MUSE_SPARK_MODEL_STANDARD)
     external_host = models.CharField(max_length=255, null=True, blank=True, default='')
     allow_unverified_bots = models.BooleanField(default=False)
     google_api_key = models.TextField(null=True, blank=True, default='')
