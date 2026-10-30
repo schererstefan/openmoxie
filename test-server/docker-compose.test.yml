@@ -1,0 +1,30 @@
+# TEST ONLY - isolated OpenMoxie copy, branch mycroft-bridge-wiring.
+# Never point the robot at this broker. Live is 8001/8883; test is 8002/8884.
+# Images are test-only names so a build can never overwrite the live images.
+services:
+  mqtt:
+    build:
+      context: ./
+      dockerfile: ./mqtt.Dockerfile
+      platforms:
+        - linux/arm64
+    image: openmoxie-test-mqtt:latest
+    container_name: openmoxie-test-mqtt-1
+    ports:
+      - "8884:8883"
+    volumes:
+      - ./local/work:/mosquitto/log
+  server:
+    build:
+      context: ./
+      dockerfile: ./Dockerfile
+      platforms:
+        - linux/arm64
+    image: openmoxie-test-server:latest
+    container_name: openmoxie-test-server-1
+    ports:
+      - "8002:8000"
+    volumes:
+      - ./local/work:/app/site/work
+    depends_on:
+      - mqtt
