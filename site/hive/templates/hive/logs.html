@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block content %}
+<div class="moxheader"><a href="{% url 'hive:dashboard' %}"><img class="moximage" src="{% static 'hive/openmoxie_logo.svg' %}"></a>OpenMoxie<span class="moxversion">{{moxie_version}}</span></div>
+<style>
+  .log-box { height: 420px; overflow-y: auto; background: #212529; color: #e9ecef; padding: 0.5rem; border-radius: 0.25rem; }
+  .log-line { font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; padding: 0 0.25rem; }
+  .log-ota { background: #664d03; color: #ffecb5; }
+  .log-failure { background: #842029; color: #f8d7da; }
+</style>
+<div class="p-3">
+<h2>Logs</h2>
+<p>
+  Read-only tail of the server log (debug.log, including device logs) and the
+  MQTT broker log (mosquitto.log) from the app work directory. Filters apply
+  within the tailed lines &mdash; raise the line count to look further back.
+  OTA/BoUpdater lines and failure markers (timeout, 404, checksum, signature,
+  corrupt, failed, unknown ca) are highlighted.
+</p>
+<form id="log_filters" method="get" action="{% url 'hive:logs' %}" class="row g-2 align-items-end">
+  <div class="col-auto">
+    <label class="form-label" for="filter_file">File</label>
+    <select id="filter_file" name="file" class="form-select form-select-sm">
+      <option value="">Both logs</option>
+      {% for name in allowed_files %}
+      <option value="{{name}}"{% if filters.file == name %} selected{% endif %}>{{name}}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <label class="form-label" for="filter_device">Device ID</label>
+    <input id="filter_device" name="device" class="form-control form-control-sm" value="{{filters.device}}">
+  </div>
+  <div class="col-auto">
+    <label class="form-label" for="filter_tag">Tag</label>
+    <input id="filter_tag" name="tag" class="form-control form-control-sm" placeholder="BoUpdater" value="{{filters.tag}}">
+  </div>
+  <div class="col-auto">
+    <label class="form-label" for="filter_level">Level</label>
+    <input id="filter_level" name="level" class="form-control form-control-sm" placeholder="ERROR" value="{{filters.level}}">
+  </div>
+  <div class="col-auto">
+    <label class="form-label" for="filter_q">Text search</label>
+    <input id="filter_q" name="q" class="form-control form-control-sm" value="{{filters.q}}">
+  </div>
+  <div class="col-auto">
+    <label class="form-label" for="filter_lines">Lines</label>
+    <input id="filter_lines" name="lines" type="number" min="1" max="2000" class="form-control form-control-sm" value="{{lines_requested}}">
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+    <button type="button" id="refresh_now" class="btn btn-secondary btn-sm">Refresh now</button>
+  </div>
+  <div class="col-auto form-check">
+    <input id="auto_refresh" type="checkbox" class="form-check-input" checked>
+    <label class="form-check-label" for="auto_refresh">Auto-refresh (5s)</label>
+  </div>
+</form>
+<br>
+{% for f in files_data %}
+<h3>{{f.label}}</h3>
+{% if not f.exists %}
+<div class="alert alert-secondary log-missing" data-file="{{f.filename}}">{{f.filename}} not found in the work directory yet.</div>
+{% endif %}
+<div class="log-box" data-file="{{f.filename}}">
+  {% for line in f.lines %}
+  <div class="log-line{% if line.failure %} log-failure{% elif line.ota %} log-ota{% endif %}">{{line.text}}</div>
+  {% endfor %}
+</div>
+<br>
+{% endfor %}
+</div>
+<script>
+  (function () {
+    var apiUrl = "{% url 'hive:logs_api' %}";
+    function params() {
+      var p = new URLSearchParams();
+      ["file", "device", "tag", "level", "q", "lines"].forEach(function (name) {
+        var el = document.querySelector("#log_filters [name='" + name + "']");
+        if (el && el.value) { p.set(name, el.value); }
+      });
+      return p.toString();
+    }
+    function renderFile(name, data) {
+      var box = document.querySelector(".log-box[data-file='" + name + "']");
+      if (!box || !data) { return; }
+      box.textContent = "";
+      data.lines.forEach(function (line) {
+        var div = document.createElement("div");
+        div.className = "log-line" + (line.failure ? " log-failure" : (line.ota ? " log-ota" : ""));
+        div.textContent = line.text;
+        box.appendChild(div);
+      });
+      box.scrollTop = box.scrollHeight;
+      var missing = document.querySelector(".log-missing[data-file='" + name + "']");
+      if (missing) { missing.style.display = data.exists ? "none" : ""; }
+    }
+    function refresh() {
+      fetch(apiUrl + "?" + params(), {headers: {"Accept": "application/json"}})
+        .then(function (resp) { return resp.ok ? resp.json() : null; })
+        .then(function (payload) {
+          if (!payload) { return; }
+          Object.keys(payload.files).forEach(function (name) { renderFile(name, payload.files[name]); });
+        })
+        .catch(function () { /* keep last good render */ });
+    }
+    document.getElementById("refresh_now").addEventListener("click", refresh);
+    setInterval(function () {
+      if (document.getElementById("auto_refresh").checked) { refresh(); }
+    }, 5000);
+    document.querySelectorAll(".log-box").forEach(function (box) { box.scrollTop = box.scrollHeight; });
+  })();
+</script>
+{% endblock %}

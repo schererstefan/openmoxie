@@ -161,3 +161,80 @@ single-stepping, and a full wired sequence publishing nothing.
 5. Live test protocol: daylight, robot in view, post-OTA-803, one
    action at a time — to be scheduled separately. This checkpoint
    claims no live robot behaviour.
+
+## Logs monitor (separate commit, same branch)
+
+Added a read-only MQTT / server log monitor page, clone only. Nothing
+was deployed, nothing published to a broker, and no live log file was
+read during validation (temp-dir fixtures only).
+
+What was built:
+
+- `site/hive/logtail.py` — bounded tail reader. Resolves the hive app
+  work dir from `settings.DATA_STORE_DIR` / `BASE_DIR / 'work'` (the
+  `/app/site/work` container mapping; no live-install path hardcoded),
+  reads backwards from EOF in 8 KiB blocks scanning at most 4 MiB, so a
+  whole file is never loaded into memory. Missing/unreadable files
+  return an empty result instead of raising.
+- `logs_view` / `logs_api` in `site/hive/views.py`, routes `logs/` and
+  `logs_api/` in `site/hive/urls.py` (served at `/hive/logs/` and
+  `/hive/logs_api/`), template `site/hive/templates/hive/logs.html`,
+  linked as "Logs" from `dashboard.html` next to Admin.
+- Shows the tail of the two fixed work-dir files — `debug.log`
+  (Django server log, including device logs) and `mosquitto.log`
+  (broker PUBLISH/PING log) — last 200 lines each by default, count via
+  the `lines` query parameter (`n`/`count`/`limit` accepted), hard cap
+  2000 lines per file. Filters (all case-insensitive substrings, ANDed,
+  applied within the tailed window): `device`, `tag`, `level`, `q`.
+  The page auto-refreshes by polling `logs_api/` every 5 s (checkbox,
+  plus Refresh now) and re-renders line text via `textContent`.
+  OTA/BoUpdater lines are highlighted, as are failure markers:
+  timeout, 404, checksum, signature, corrupt, failed, unknown ca.
+
+Security:
+
+- Both views require the Django admin gate
+  (`staff_member_required`, login at `/admin/login/`) — the only auth
+  gate that exists in this project; the other hive views have none.
+  Neither view has any CSRF exemption (both are GET-only), and no
+  unauthenticated endpoint was added.
+- Path traversal is impossible by construction: `logtail` accepts only
+  the two exact filenames in `ALLOWED_LOG_FILES`; any other `file`
+  parameter (traversal, absolute path, other filename) is rejected
+  with HTTP 400 before any filesystem access, no path is ever taken
+  from the request, and the resolved parent is re-checked against the
+  work dir.
+
+Deliberately NOT done: no device-log persistence to the DB, no new
+admin models/registrations, no change to the device-logs handler, no
+MQTT/broker config change, no new mount. Read-only file tail only.
+
+Tests: `site/hive/test_logs_view.py` (16 tests, offline/RequestFactory
+style matching the existing hive tests — there is no template-rendering
+view-test harness, so `logs_view` is checked with `render` mocked for
+template+context while `logs_api` is exercised unmocked; the template
+was additionally rendered once under production-like settings in a
+throwaway probe, staff 200 / anonymous 302 to `/admin/login/`).
+Coverage: fixed filenames only, missing file graceful, tail order and
+caps (requested and absolute), device/tag/level/text filters,
+OTA/failure highlighting, staff-only access, bad filename 400, no
+CSRF exemption, routes, dashboard link. Full relevant suite from
+`site/` with the clone venv:
+
+    ../.venv-stageb/bin/python -m unittest hive.test_mycroft_bridge hive.test_overnight hive.test_control_commands hive.test_bridge_wiring hive.test_logs_view
+
+Result: **Ran 135 tests, OK** (119 wiring baseline + 16 new).
+
+Still needs Stefan decisions before any live deploy:
+
+1. Deploy itself: this is clone-only; deploying to the running
+   install (and confirming `mosquitto.log` is present in its
+   `local/work` with the expected name/format) is a separate daylight
+   step. No live log was read to verify that.
+2. Exposure: the page is admin-staff-only, but it still surfaces full
+   server/broker log text (device ids, topics, possibly transcripts
+   in debug.log) to any staff session on the LAN — decide whether
+   that is acceptable as-is, and whether log retention/rotation of
+   mosquitto.log needs a cap so the tail window stays useful.
+3. Whether device logs should later be persisted (MoxieLogs DB) for
+   history beyond the file tail — explicitly out of scope here.

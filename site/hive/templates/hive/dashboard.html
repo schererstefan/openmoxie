@@ -11,6 +11,7 @@
 <a title="Create QR with WiFI credentials to get Moxie on a new network" class="btn btn-primary btn-sm" role="button" href="{% url 'hive:wifi_edit' %}">Wifi QR Code</a>
 <a title="Configure System" class="btn btn-secondary btn-sm" href="{% url 'hive:setup' %}">Setup</a>
 <a title="Administer Database" class="btn btn-secondary btn-sm" href="{% url 'admin:index' %}">Admin</a>
+<a title="Read-only tail of the server and MQTT broker logs (admin login required)" class="btn btn-secondary btn-sm" href="{% url 'hive:logs' %}">Logs</a>
 <table class="table table-striped">
   <tr><th class="w-25">Status</th><th>Moxie Devices</th><th>Schedule</th><th>Actions</th></tr>
   {% for device in recent_devices %}

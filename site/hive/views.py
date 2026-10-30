@@ -1,6 +1,7 @@
 from django.forms import model_to_dict
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth import get_user_model
 from django.views import generic
 from django.views.decorators.http import require_http_methods
@@ -13,6 +14,7 @@ import qrcode
 from PIL import Image
 from io import BytesIO
 
+from . import logtail
 from .models import CHAT_PROVIDER_MUSE_SPARK, CHAT_PROVIDER_OPENAI, MUSE_SPARK_MODELS, GlobalResponse, SinglePromptChat, MoxieDevice, MoxieSchedule, HiveConfiguration, MentorBehavior
 from .content.data import DM_MISSION_CONTENT_IDS, get_moxie_customization_groups
 from .data_import import update_import_status, import_content
@@ -490,3 +492,57 @@ class MoxieDataView(generic.DetailView):
         context['active_config'] = json.dumps(get_instance().robot_data().get_config_for_device(self.object))
         context['persist_data'] = json.dumps(get_instance().robot_data().get_persist_for_device(self.object))
         return context
+
+# LOGS - Read-only tail of the server log (debug.log) and MQTT broker log
+# (mosquitto.log) from the app work dir. Admin-gated: staff_member_required
+# is the existing Django admin login gate (the only auth gate in this
+# project); these GET views deliberately have no CSRF exemption. Only the two
+# fixed filenames in logtail.ALLOWED_LOG_FILES can ever be read - any other
+# file parameter is rejected, and no path is ever taken from the request.
+def _logs_payload(request):
+    params = request.GET
+    raw_count = next(
+        (params[key] for key in ("lines", "n", "count", "limit") if params.get(key)),
+        None)
+    count = logtail.parse_line_count(raw_count)
+    filename = params.get("file") or params.get("filename") or None
+    if filename is not None and filename not in logtail.ALLOWED_LOG_FILES:
+        raise ValueError(f"log file not allowed: {filename!r}")
+    filters = {
+        "device": params.get("device") or params.get("device_id") or "",
+        "tag": params.get("tag") or "",
+        "level": params.get("level") or "",
+        "q": params.get("q") or params.get("search") or params.get("text") or "",
+        "file": filename or "",
+    }
+    files = logtail.collect_logs(
+        filenames=[filename] if filename else None,
+        count=count,
+        device=filters["device"], tag=filters["tag"],
+        level=filters["level"], q=filters["q"])
+    return {
+        "files": files,
+        "filters": filters,
+        "lines_requested": count,
+        "allowed_files": list(logtail.ALLOWED_LOG_FILES),
+    }
+
+@staff_member_required(login_url="/admin/login/")
+@require_http_methods(["GET"])
+def logs_view(request):
+    try:
+        payload = _logs_payload(request)
+    except ValueError as e:
+        return HttpResponseBadRequest(str(e))
+    context = dict(payload)
+    context["files_data"] = list(payload["files"].values())
+    return render(request, "hive/logs.html", context)
+
+@staff_member_required(login_url="/admin/login/")
+@require_http_methods(["GET"])
+def logs_api(request):
+    try:
+        payload = _logs_payload(request)
+    except ValueError as e:
+        return JsonResponse({"error": str(e)}, status=400)
+    return JsonResponse(payload)

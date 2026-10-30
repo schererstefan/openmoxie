@@ -29,4 +29,6 @@ urlpatterns = [
     path("export_data/", views.export_data, name="export_data"),
     path("import_review/", views.upload_import_data, name="import_review"),
     path("import_data/", views.import_data, name="import_data"),
+    path("logs/", views.logs_view, name="logs"),
+    path("logs_api/", views.logs_api, name="logs_api"),
 ]
