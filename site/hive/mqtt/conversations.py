@@ -362,7 +362,8 @@ class SingleContextChatSession(ChatSession):
 class SinglePromptDBChatSession(SingleContextChatSession):
     def __init__(self, pk):
         source = SinglePromptChat.objects.get(pk=pk)
-        super().__init__(max_history=source.max_history, max_volleys=source.max_volleys, model=source.model, prompt=source.prompt, opener=source.opener, max_tokens=source.max_tokens, temperature=source.temperature, provider=resolve_chat_provider(vendor=source.vendor))
+        _vendor_explicit = getattr(source, "vendor_explicit", False)
+        super().__init__(max_history=source.max_history, max_volleys=source.max_volleys, model=source.model, prompt=source.prompt, opener=source.opener, max_tokens=source.max_tokens, temperature=source.temperature, provider=resolve_chat_provider(vendor=source.vendor if _vendor_explicit else None, vendor_explicit=_vendor_explicit))
         if source.code:
             try:
                 loc = locals()

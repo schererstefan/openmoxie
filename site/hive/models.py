@@ -32,6 +32,8 @@ class SinglePromptChat(models.Model):
     opener = models.TextField()
     prompt = models.TextField()
     vendor = models.IntegerField(choices=[(tag.value, tag.name) for tag in AIVendor],default=AIVendor.OPEN_AI.value)
+    # True only when an admin explicitly chose a vendor for that conversation; defaulted rows are False so the global provider governs them.
+    vendor_explicit = models.BooleanField(default=False)
     model = models.CharField(max_length=200, default="gpt-6-luna")
     max_tokens = models.IntegerField(default=70)
     temperature = models.FloatField(default=0.5)

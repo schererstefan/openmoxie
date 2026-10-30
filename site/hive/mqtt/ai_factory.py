@@ -108,23 +108,76 @@ def get_global_chat_provider():
     return _GLOBAL_CHAT_PROVIDER
 
 
-def resolve_chat_provider(vendor=None, global_provider=None):
-    """Resolve the effective chat provider (Stage 1 B.1 rule, exact).
+def resolve_chat_provider_detailed(vendor=None, global_provider=None, vendor_explicit=None):
+    """Resolve the effective chat provider with provenance.
 
-    The conversation ``vendor`` wins if it names a provider whose key is
-    configured; else the global ``chat_provider`` if its key is configured;
-    else ``openai``. Key *presence* drives this selection only -- once a
-    provider is resolved, a missing key or a request failure must fail loudly
-    in the caller, never silently fall back to the other provider.
+    Returns ``(provider, fell_back, source)`` where ``provider`` is the
+    canonical provider string, ``fell_back`` is ``True`` only when a chosen
+    provider could not be used because its key is not configured, and
+    ``source`` is one of ``"explicit"``, ``"global"``, ``"gpt_default"``
+    or ``"gpt_fallback"``.
+
+    Precedence:
+
+    1. EXPLICIT per-conversation override -- used when ``vendor_explicit``
+       is ``True``, or when ``vendor_explicit`` is ``None`` and ``vendor``
+       is not ``None`` (a ``vendor`` argument passed to the legacy
+       :func:`resolve_chat_provider` therefore counts as explicit, which
+       preserves existing callers/tests). The vendor value is ignored
+       entirely when ``vendor_explicit`` is ``False``, even if a vendor
+       value is supplied (e.g. a merely-defaulted ``SinglePromptChat``
+       row whose ``vendor`` field holds the model default).
+    2. GLOBAL default -- the ``global_provider`` argument when supplied,
+       otherwise the stored ``_GLOBAL_CHAT_PROVIDER`` (loaded from
+       ``HiveConfiguration.chat_provider``).
+    3. GPT fallback -- ``"openai"``.
+
+    If the chosen (explicit or global) provider has no key configured,
+    fall back to ``"openai"`` with ``fell_back=True`` and
+    ``source="gpt_fallback"``; this never raises for a missing key and
+    never drops the conversation. If the global provider is unset or is
+    the default ``"openai"``, return ``"openai"`` with
+    ``fell_back=False`` and ``source="gpt_default"``. GPT (``openai``)
+    remains the default provider.
     """
-    if vendor is not None:
+    if vendor_explicit is None:
+        is_explicit = vendor is not None
+    else:
+        is_explicit = bool(vendor_explicit)
+
+    if is_explicit and vendor is not None:
         candidate = normalize_provider(vendor)
         if has_provider_key(candidate):
-            return candidate
-    candidate = normalize_provider(global_provider) if global_provider is not None else _GLOBAL_CHAT_PROVIDER
-    if has_provider_key(candidate):
-        return candidate
-    return PROVIDER_OPENAI
+            return candidate, False, "explicit"
+        return PROVIDER_OPENAI, True, "gpt_fallback"
+
+    if global_provider is not None:
+        global_candidate = normalize_provider(global_provider)
+    else:
+        global_candidate = _GLOBAL_CHAT_PROVIDER
+
+    if global_candidate == PROVIDER_OPENAI:
+        return PROVIDER_OPENAI, False, "gpt_default"
+    if has_provider_key(global_candidate):
+        return global_candidate, False, "global"
+    return PROVIDER_OPENAI, True, "gpt_fallback"
+
+
+def resolve_chat_provider(vendor=None, global_provider=None, vendor_explicit=None):
+    """Resolve the effective chat provider.
+
+    Backward-compatible wrapper around
+    :func:`resolve_chat_provider_detailed`: a ``vendor`` argument passed
+    here counts as explicit when ``vendor_explicit`` is ``None``
+    (preserving existing tests/callers). Pass ``vendor_explicit=False``
+    to ignore a merely-defaulted ``vendor`` value so the global provider
+    governs, or ``vendor_explicit=True`` for an explicit per-conversation
+    override. Returns only the provider string.
+    """
+    provider, _fell_back, _source = resolve_chat_provider_detailed(
+        vendor=vendor, global_provider=global_provider, vendor_explicit=vendor_explicit
+    )
+    return provider
 
 
 def create_chat_client(provider):

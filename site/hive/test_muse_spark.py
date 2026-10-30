@@ -218,7 +218,7 @@ class MuseSparkTests(unittest.TestCase):
         source = SimpleNamespace(
             max_history=20, max_volleys=10, model="muse-spark-1.3",
             prompt="Be brief.", opener="Hi!", max_tokens=70, temperature=0.5,
-            vendor=self.models.AIVendor.MUSE_SPARK.value, code=None,
+            vendor=self.models.AIVendor.MUSE_SPARK.value, vendor_explicit=True, code=None,
         )
 
         class _Manager:
@@ -322,6 +322,257 @@ class MuseSparkTests(unittest.TestCase):
         self.assertEqual(cfg.chat_provider, "openai")
         self.assertEqual(cfg.muse_spark_api_key, "test-key-not-real")
         self.assertEqual(cfg.muse_spark_model, "muse-spark-1.3")
+
+
+class MuseSparkGlobalSwitchTests(unittest.TestCase):
+    """Global provider governs merely-defaulted conversations.
+
+    Covers resolve_chat_provider_detailed() and resolve_chat_provider()
+    for the precedence: explicit > global > GPT fallback/default.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import django
+        from django.conf import settings
+
+        if not settings.configured:
+            settings.configure(
+                INSTALLED_APPS=["hive"],
+                TEMPLATES=[{"BACKEND": "django.template.backends.django.DjangoTemplates"}],
+                SECRET_KEY="offline-muse-spark-tests",
+            )
+        django.setup()
+        from hive.mqtt import ai_factory, conversations
+        from hive import models
+
+        cls.factory = ai_factory
+        cls.conv = conversations
+        cls.models = models
+
+    def setUp(self):
+        self._saved = (
+            self.factory._OPENAPI_KEY,
+            self.factory._MUSE_SPARK_KEY,
+            self.factory.get_global_chat_provider(),
+        )
+        self.factory.set_openai_key("test-key-not-real")
+        self.factory.set_muse_spark_key(None)
+        self.factory.set_global_chat_provider("openai")
+        self.addCleanup(self._restore_factory)
+
+    def _restore_factory(self):
+        openai_key, spark_key, provider = self._saved
+        self.factory.set_openai_key(openai_key)
+        self.factory.set_muse_spark_key(spark_key)
+        self.factory.set_global_chat_provider(provider)
+
+    def test_global_spark_no_explicit_override(self):
+        self.factory.set_openai_key("test-key-not-real")
+        self.factory.set_muse_spark_key("test-key-not-real")
+        self.factory.set_global_chat_provider("muse_spark")
+        # Detailed: no vendor at all -> global governs.
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(vendor=None),
+            ("muse_spark", False, "global"),
+        )
+        # Detailed: merely-defaulted vendor (OPEN_AI=1) with vendor_explicit=False is ignored.
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(
+                vendor=self.models.AIVendor.OPEN_AI.value, vendor_explicit=False),
+            ("muse_spark", False, "global"),
+        )
+        # Simple resolver mirrors detailed.
+        self.assertEqual(self.factory.resolve_chat_provider(), "muse_spark")
+        self.assertEqual(
+            self.factory.resolve_chat_provider(
+                vendor=self.models.AIVendor.OPEN_AI.value, vendor_explicit=False),
+            "muse_spark",
+        )
+        # Explicit global_provider argument also governs when no explicit override.
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(global_provider="muse_spark"),
+            ("muse_spark", False, "global"),
+        )
+
+    def test_global_spark_explicit_openai_override(self):
+        self.factory.set_openai_key("test-key-not-real")
+        self.factory.set_muse_spark_key("test-key-not-real")
+        self.factory.set_global_chat_provider("muse_spark")
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(
+                vendor=self.models.AIVendor.OPEN_AI.value, vendor_explicit=True),
+            ("openai", False, "explicit"),
+        )
+        self.assertEqual(
+            self.factory.resolve_chat_provider(
+                vendor=self.models.AIVendor.OPEN_AI.value, vendor_explicit=True),
+            "openai",
+        )
+        # Backward compat: vendor passed without vendor_explicit counts as explicit.
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(vendor=self.models.AIVendor.OPEN_AI.value),
+            ("openai", False, "explicit"),
+        )
+        self.assertEqual(
+            self.factory.resolve_chat_provider(vendor=self.models.AIVendor.OPEN_AI.value),
+            "openai",
+        )
+
+    def test_global_gpt_explicit_spark_override(self):
+        self.factory.set_openai_key("test-key-not-real")
+        self.factory.set_muse_spark_key("test-key-not-real")
+        self.factory.set_global_chat_provider("openai")
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(
+                vendor=self.models.AIVendor.MUSE_SPARK.value, vendor_explicit=True),
+            ("muse_spark", False, "explicit"),
+        )
+        self.assertEqual(
+            self.factory.resolve_chat_provider(
+                vendor=self.models.AIVendor.MUSE_SPARK.value, vendor_explicit=True),
+            "muse_spark",
+        )
+        # Backward compat: vendor passed without vendor_explicit counts as explicit.
+        self.assertEqual(
+            self.factory.resolve_chat_provider(vendor=self.models.AIVendor.MUSE_SPARK.value),
+            "muse_spark",
+        )
+
+    def test_global_spark_no_spark_key_falls_back(self):
+        self.factory.set_openai_key("test-key-not-real")
+        self.factory.set_muse_spark_key(None)
+        self.factory.set_global_chat_provider("muse_spark")
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(vendor=None),
+            ("openai", True, "gpt_fallback"),
+        )
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(
+                vendor=self.models.AIVendor.OPEN_AI.value, vendor_explicit=False),
+            ("openai", True, "gpt_fallback"),
+        )
+        self.assertEqual(self.factory.resolve_chat_provider(), "openai")
+        self.assertEqual(
+            self.factory.resolve_chat_provider(
+                vendor=self.models.AIVendor.OPEN_AI.value, vendor_explicit=False),
+            "openai",
+        )
+
+    def test_global_unset_default_is_gpt_default(self):
+        self.factory.set_openai_key("test-key-not-real")
+        self.factory.set_muse_spark_key("test-key-not-real")
+        self.factory.set_global_chat_provider("openai")
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(vendor=None),
+            ("openai", False, "gpt_default"),
+        )
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(
+                vendor=self.models.AIVendor.OPEN_AI.value, vendor_explicit=False),
+            ("openai", False, "gpt_default"),
+        )
+        self.assertEqual(self.factory.resolve_chat_provider(), "openai")
+        self.assertEqual(
+            self.factory.resolve_chat_provider(vendor=None, global_provider="openai"),
+            "openai",
+        )
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(global_provider="openai"),
+            ("openai", False, "gpt_default"),
+        )
+
+    def test_explicit_vendor_no_key_gpt_fallback(self):
+        self.factory.set_openai_key("test-key-not-real")
+        self.factory.set_muse_spark_key(None)
+        self.factory.set_global_chat_provider("openai")
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(
+                vendor=self.models.AIVendor.MUSE_SPARK.value, vendor_explicit=True),
+            ("openai", True, "gpt_fallback"),
+        )
+        self.assertEqual(
+            self.factory.resolve_chat_provider(
+                vendor=self.models.AIVendor.MUSE_SPARK.value, vendor_explicit=True),
+            "openai",
+        )
+        # Backward compat path: vendor without vendor_explicit is explicit, same fallback.
+        self.assertEqual(
+            self.factory.resolve_chat_provider_detailed(vendor=self.models.AIVendor.MUSE_SPARK.value),
+            ("openai", True, "gpt_fallback"),
+        )
+        self.assertEqual(
+            self.factory.resolve_chat_provider(vendor=self.models.AIVendor.MUSE_SPARK.value),
+            "openai",
+        )
+
+    def test_db_session_defaulted_vendor_follows_global_spark(self):
+        self.factory.set_openai_key("test-key-not-real")
+        self.factory.set_muse_spark_key("test-key-not-real")
+        self.factory.set_global_chat_provider("muse_spark")
+        source = SimpleNamespace(
+            max_history=20, max_volleys=10, model="muse-spark-1.3",
+            prompt="Be brief.", opener="Hi!", max_tokens=70, temperature=0.5,
+            vendor=self.models.AIVendor.OPEN_AI.value, vendor_explicit=False, code=None,
+        )
+
+        class _Manager:
+            def get(self, pk):
+                return source
+
+        fake_chat = SimpleNamespace(objects=_Manager())
+        with patch.object(self.conv, "SinglePromptChat", fake_chat):
+            session = self.conv.SinglePromptDBChatSession(pk=1)
+        self.assertEqual(session.provider, "muse_spark")
+
+    def test_db_session_explicit_openai_beats_global_spark(self):
+        self.factory.set_openai_key("test-key-not-real")
+        self.factory.set_muse_spark_key("test-key-not-real")
+        self.factory.set_global_chat_provider("muse_spark")
+        source = SimpleNamespace(
+            max_history=20, max_volleys=10, model="gpt-6-luna",
+            prompt="Be brief.", opener="Hi!", max_tokens=70, temperature=0.5,
+            vendor=self.models.AIVendor.OPEN_AI.value, vendor_explicit=True, code=None,
+        )
+
+        class _Manager:
+            def get(self, pk):
+                return source
+
+        fake_chat = SimpleNamespace(objects=_Manager())
+        with patch.object(self.conv, "SinglePromptChat", fake_chat):
+            session = self.conv.SinglePromptDBChatSession(pk=1)
+        self.assertEqual(session.provider, "openai")
+
+    def test_db_session_missing_vendor_explicit_attr_follows_global(self):
+        self.factory.set_openai_key("test-key-not-real")
+        self.factory.set_muse_spark_key("test-key-not-real")
+        self.factory.set_global_chat_provider("muse_spark")
+        # Older/mock object without vendor_explicit: getattr fallback is False.
+        source = SimpleNamespace(
+            max_history=20, max_volleys=10, model="muse-spark-1.3",
+            prompt="Be brief.", opener="Hi!", max_tokens=70, temperature=0.5,
+            vendor=self.models.AIVendor.OPEN_AI.value, code=None,
+        )
+
+        class _Manager:
+            def get(self, pk):
+                return source
+
+        fake_chat = SimpleNamespace(objects=_Manager())
+        with patch.object(self.conv, "SinglePromptChat", fake_chat):
+            session = self.conv.SinglePromptDBChatSession(pk=1)
+        self.assertEqual(session.provider, "muse_spark")
+
+    def test_vendor_explicit_model_default_and_migration(self):
+        chat = self.models.SinglePromptChat()
+        self.assertEqual(chat.vendor, self.models.AIVendor.OPEN_AI.value)
+        self.assertFalse(chat.vendor_explicit)
+        migration = importlib.import_module(
+            "hive.migrations.0019_singlepromptchat_vendor_explicit").Migration
+        self.assertEqual(migration.dependencies, [("hive", "0018_muse_spark_chat_provider")])
+        added = {op.name for op in migration.operations if op.__class__.__name__ == "AddField"}
+        self.assertEqual(added, {"vendor_explicit"})
 
 
 if __name__ == "__main__":
