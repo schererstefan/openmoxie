@@ -22,9 +22,11 @@ CHAT_PROVIDER_CHOICES = [
 # selection never changes STT.
 STT_PROVIDER_OPENAI = "openai"
 STT_PROVIDER_MUSE_TRANSCRIBE = "muse_transcribe"
+STT_PROVIDER_MUSE_STREAMING = "muse_streaming"
 STT_PROVIDER_CHOICES = [
     (STT_PROVIDER_OPENAI, "Whisper (OpenAI)"),
     (STT_PROVIDER_MUSE_TRANSCRIBE, "Muse Transcribe (Meta)"),
+    (STT_PROVIDER_MUSE_STREAMING, "Muse Transcribe streaming (Meta) — opt-in"),
 ]
 
 # Muse Spark model offered by the setup page. The standard model is the
@@ -112,6 +114,18 @@ class HiveConfiguration(models.Model):
     # keep on the setup page, matching the other key fields.
     stt_provider = models.CharField(max_length=32, choices=STT_PROVIDER_CHOICES, default=STT_PROVIDER_OPENAI)
     muse_transcribe_api_key = models.TextField(null=True, blank=True, default='')
+    # Streaming knobs (opt-in; validated in hive.mqtt.stt_knobs before save).
+    # Streaming takes effect only when stt_provider is muse_streaming AND
+    # stt_streaming_enabled is True; with the switch off, muse_streaming
+    # resolves to the one-shot path. Diarization is off by default for
+    # privacy; speaker labels are never logged or stored.
+    stt_streaming_enabled = models.BooleanField(default=False)
+    stt_diarization_enabled = models.BooleanField(default=False)
+    stt_endpointing_mode = models.CharField(max_length=32, default='auto')
+    stt_endpointing_timeout_ms = models.IntegerField(default=1000)
+    stt_language_hint = models.CharField(max_length=32, default='auto')
+    stt_keyword_bias = models.TextField(blank=True, default='')
+    stt_code_switching_enabled = models.BooleanField(default=False)
     external_host = models.CharField(max_length=255, null=True, blank=True, default='')
     allow_unverified_bots = models.BooleanField(default=False)
     google_api_key = models.TextField(null=True, blank=True, default='')

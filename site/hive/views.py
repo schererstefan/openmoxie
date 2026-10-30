@@ -15,7 +15,7 @@ from PIL import Image
 from io import BytesIO
 
 from . import logtail
-from .models import CHAT_PROVIDER_MUSE_SPARK, CHAT_PROVIDER_OPENAI, MUSE_SPARK_MODELS, STT_PROVIDER_MUSE_TRANSCRIBE, STT_PROVIDER_OPENAI, GlobalResponse, SinglePromptChat, MoxieDevice, MoxieSchedule, HiveConfiguration, MentorBehavior
+from .models import CHAT_PROVIDER_MUSE_SPARK, CHAT_PROVIDER_OPENAI, MUSE_SPARK_MODELS, GlobalResponse, SinglePromptChat, MoxieDevice, MoxieSchedule, HiveConfiguration, MentorBehavior
 from .content.data import DM_MISSION_CONTENT_IDS, get_moxie_customization_groups
 from .data_import import update_import_status, import_content
 from .mqtt.moxie_server import get_instance
@@ -35,6 +35,7 @@ from .mqtt.control_commands import (
     validate_mood,
 )
 from .mqtt.robot_data import DEFAULT_ROBOT_CONFIG, DEFAULT_ROBOT_SETTINGS
+from .mqtt.stt_knobs import resolve_stt_mode, validate_stt_knobs
 from .mqtt.volley import Volley
 import json
 import uuid
@@ -84,12 +85,42 @@ def hive_configure(request):
     muse_spark_model = request.POST.get('muse_spark_model')
     if muse_spark_model in MUSE_SPARK_MODELS:
         cfg.muse_spark_model = muse_spark_model
-    # STT provider (additive; default Whisper, opt-in Muse Transcribe).
-    # Transcribe override key: blank means keep (and blank stored means
-    # reuse the Muse Spark key -- see ai_factory.get_muse_transcribe_key).
-    stt_provider = request.POST.get('stt_provider')
-    if stt_provider in (STT_PROVIDER_OPENAI, STT_PROVIDER_MUSE_TRANSCRIBE):
-        cfg.stt_provider = stt_provider
+    # STT knobs (provider + streaming controls) are validated in
+    # exactly one place -- stt_knobs.validate_stt_knobs -- so raw POST
+    # values never reach storage or any provider API unvalidated.
+    # Allowlist fields (provider/endpointing/language) keep the
+    # current stored value when rejected, matching the previous
+    # provider-only behaviour; timeout/keywords store the
+    # clamped/cleaned values. Checkboxes follow form semantics (an
+    # unchecked box is absent and saves as off). Nothing here raises
+    # on bad input. Transcribe override key: blank means keep (and
+    # blank stored means reuse the Muse Spark key).
+    clean_knobs, rejected_knobs = validate_stt_knobs({
+        'stt_provider': request.POST.get('stt_provider'),
+        'stt_streaming_enabled': request.POST.get('stt_streaming_enabled'),
+        'stt_diarization_enabled': request.POST.get('stt_diarization_enabled'),
+        'stt_endpointing_mode': request.POST.get('stt_endpointing_mode'),
+        'stt_endpointing_timeout_ms': request.POST.get('stt_endpointing_timeout_ms'),
+        'stt_language_hint': request.POST.get('stt_language_hint'),
+        'stt_keyword_bias': request.POST.get('stt_keyword_bias'),
+        'stt_code_switching_enabled': request.POST.get('stt_code_switching_enabled'),
+    })
+    if rejected_knobs:
+        # Field names only: raw knob values are not logged.
+        logger.warning("Rejected invalid STT knob fields: %s", ",".join(sorted(rejected_knobs)))
+    if request.POST.get('stt_provider') is not None and 'stt_provider' not in rejected_knobs:
+        cfg.stt_provider = clean_knobs['stt_provider']
+    cfg.stt_streaming_enabled = clean_knobs['stt_streaming_enabled']
+    cfg.stt_diarization_enabled = clean_knobs['stt_diarization_enabled']
+    if request.POST.get('stt_endpointing_mode') is not None and 'stt_endpointing_mode' not in rejected_knobs:
+        cfg.stt_endpointing_mode = clean_knobs['stt_endpointing_mode']
+    if request.POST.get('stt_endpointing_timeout_ms') is not None:
+        cfg.stt_endpointing_timeout_ms = clean_knobs['stt_endpointing_timeout_ms']
+    if request.POST.get('stt_language_hint') is not None and 'stt_language_hint' not in rejected_knobs:
+        cfg.stt_language_hint = clean_knobs['stt_language_hint']
+    if request.POST.get('stt_keyword_bias') is not None:
+        cfg.stt_keyword_bias = clean_knobs['stt_keyword_bias']
+    cfg.stt_code_switching_enabled = clean_knobs['stt_code_switching_enabled']
     muse_transcribe_key = request.POST.get('musetranscribeapikey')
     if muse_transcribe_key:
         cfg.muse_transcribe_api_key = muse_transcribe_key
@@ -131,6 +162,27 @@ class DashboardView(generic.TemplateView):
         context['conversations'] = SinglePromptChat.objects.all()
         context['schedules'] = MoxieSchedule.objects.all()
         context['live'] = get_instance().robot_data().connected_list()
+        # Read-only STT summary (knob values only -- never key values;
+        # key presence is a boolean used solely for mode resolution).
+        hive_config = HiveConfiguration.objects.filter(name='default').first()
+        if hive_config:
+            has_muse_key = bool(
+                str(getattr(hive_config, 'muse_transcribe_api_key', '') or '').strip()
+                or str(getattr(hive_config, 'muse_spark_api_key', '') or '').strip())
+            provider = getattr(hive_config, 'stt_provider', 'openai') or 'openai'
+            streaming_enabled = bool(getattr(hive_config, 'stt_streaming_enabled', False))
+            mode, fell_back, _source = resolve_stt_mode(provider, streaming_enabled, has_muse_key)
+            context['stt_status'] = {
+                'provider': provider,
+                'mode': mode,
+                'fell_back': fell_back,
+                'streaming_enabled': streaming_enabled,
+                'diarization_enabled': bool(getattr(hive_config, 'stt_diarization_enabled', False)),
+                'endpointing_mode': getattr(hive_config, 'stt_endpointing_mode', 'auto') or 'auto',
+                'endpointing_timeout_ms': getattr(hive_config, 'stt_endpointing_timeout_ms', 1000),
+                'language_hint': getattr(hive_config, 'stt_language_hint', 'auto') or 'auto',
+                'code_switching_enabled': bool(getattr(hive_config, 'stt_code_switching_enabled', False)),
+            }
         return context
 
 # INTERACT - Chat with a remote conversation

@@ -69,8 +69,75 @@
       <select class="form-control" name="stt_provider" id="stt_provider" aria-describedby="sttProviderHelp">
         <option value="openai"{% if not object.stt_provider or object.stt_provider == 'openai' %} selected{% endif %}>Whisper (OpenAI) — default</option>
         <option value="muse_transcribe"{% if object.stt_provider == 'muse_transcribe' %} selected{% endif %}>Muse Transcribe (Meta) — opt-in, one-shot</option>
+        <option value="muse_streaming"{% if object.stt_provider == 'muse_streaming' %} selected{% endif %}>Muse Transcribe streaming (Meta) — opt-in</option>
       </select>
-      <div id="sttProviderHelp" class="form-text text-light">Whole-utterance only (streaming realtime is a follow-up, not implemented). Muse Transcribe reuses the Muse Spark key unless an override key is entered below, and falls back to Whisper for any utterance Transcribe fails on. Whisper-1 is deprecated and leaves the OpenAI API on Feb 26, 2027.</div>
+      <div id="sttProviderHelp" class="form-text text-light">One-shot stays the fallback mode: streaming is off by default until verified live, diarization is off by default, and language is auto by default. Muse Transcribe (one-shot and streaming) reuses the Muse Spark key unless an override key is entered below. Fallback chain per utterance: streaming (when enabled) → one-shot Transcribe → Whisper-1, then the usual error reply — a voice turn is never dropped silently. Whisper-1 is deprecated and leaves the OpenAI API on Feb 26, 2027.</div>
+    </div>
+    <div class="mb-3 form-check">
+      <input type="checkbox" class="form-check-input" name="stt_streaming_enabled" id="stt_streaming_enabled" aria-describedby="sttStreamingHelp"{% if object.stt_streaming_enabled %} checked{% endif %}>
+      <label class="form-check-label" for="stt_streaming_enabled">Enable streaming realtime STT (separate switch; streaming only takes effect when provider is Muse streaming)</label>
+      <div id="sttStreamingHelp" class="form-text text-light">Off by default. With streaming off, the Muse streaming provider uses the one-shot path. Partial transcripts are never sent to the robot and never logged with content.</div>
+    </div>
+    <div class="mb-3 form-check">
+      <input type="checkbox" class="form-check-input" name="stt_diarization_enabled" id="stt_diarization_enabled" aria-describedby="sttDiarizationHelp"{% if object.stt_diarization_enabled %} checked{% endif %}>
+      <label class="form-check-label" for="stt_diarization_enabled">Enable speaker diarization (streaming only)</label>
+      <div id="sttDiarizationHelp" class="form-text text-light">Diarization is OFF by default for privacy. Speaker labels are not logged or stored, even when this is on.</div>
+    </div>
+    <div class="mb-3">
+      <label for="stt_endpointing_mode" class="form-label fw-bold fs-5">Streaming Endpointing</label>
+      <select class="form-control" name="stt_endpointing_mode" id="stt_endpointing_mode" aria-describedby="sttEndpointingHelp">
+        <option value="auto"{% if not object.stt_endpointing_mode or object.stt_endpointing_mode == 'auto' %} selected{% endif %}>auto — provider decides, server timeout backstop</option>
+        <option value="server_timeout"{% if object.stt_endpointing_mode == 'server_timeout' %} selected{% endif %}>server_timeout — server ends turn after timeout</option>
+        <option value="disabled"{% if object.stt_endpointing_mode == 'disabled' %} selected{% endif %}>disabled — only provider final / end-of-speech</option>
+      </select>
+      <div id="sttEndpointingHelp" class="form-text text-light">auto: provider endpoint events end the turn, with the server timeout below as a backstop. server_timeout: the server promotes the last partial to final after the timeout with no new audio/messages. disabled: never time out server-side; only a provider final or the robot's end-of-speech ends the turn.</div>
+    </div>
+    <div class="mb-3">
+      <label for="stt_endpointing_timeout_ms" class="form-label fw-bold fs-5">Endpointing Timeout (ms)</label>
+      <input type="number" class="form-control" name="stt_endpointing_timeout_ms" id="stt_endpointing_timeout_ms" min="200" max="5000" step="100" aria-describedby="sttTimeoutHelp" value="{{object.stt_endpointing_timeout_ms|default:1000}}">
+      <div id="sttTimeoutHelp" class="form-text text-light">Silence backstop for auto/server_timeout endpointing (200–5000 ms, default 1000). Values outside the range are clamped on save.</div>
+    </div>
+    <div class="mb-3">
+      <label for="stt_language_hint" class="form-label fw-bold fs-5">STT Language Hint</label>
+      <select class="form-control" name="stt_language_hint" id="stt_language_hint" aria-describedby="sttLanguageHelp">
+        <option value="auto"{% if not object.stt_language_hint or object.stt_language_hint == 'auto' %} selected{% endif %}>auto — detect language</option>
+        <option value="en"{% if object.stt_language_hint == 'en' %} selected{% endif %}>en — English</option>
+        <option value="es"{% if object.stt_language_hint == 'es' %} selected{% endif %}>es — Spanish</option>
+        <option value="fr"{% if object.stt_language_hint == 'fr' %} selected{% endif %}>fr — French</option>
+        <option value="de"{% if object.stt_language_hint == 'de' %} selected{% endif %}>de — German</option>
+        <option value="it"{% if object.stt_language_hint == 'it' %} selected{% endif %}>it — Italian</option>
+        <option value="pt"{% if object.stt_language_hint == 'pt' %} selected{% endif %}>pt — Portuguese</option>
+        <option value="nl"{% if object.stt_language_hint == 'nl' %} selected{% endif %}>nl — Dutch</option>
+        <option value="pl"{% if object.stt_language_hint == 'pl' %} selected{% endif %}>pl — Polish</option>
+        <option value="cs"{% if object.stt_language_hint == 'cs' %} selected{% endif %}>cs — Czech</option>
+        <option value="sk"{% if object.stt_language_hint == 'sk' %} selected{% endif %}>sk — Slovak</option>
+        <option value="hu"{% if object.stt_language_hint == 'hu' %} selected{% endif %}>hu — Hungarian</option>
+        <option value="ro"{% if object.stt_language_hint == 'ro' %} selected{% endif %}>ro — Romanian</option>
+        <option value="bg"{% if object.stt_language_hint == 'bg' %} selected{% endif %}>bg — Bulgarian</option>
+        <option value="uk"{% if object.stt_language_hint == 'uk' %} selected{% endif %}>uk — Ukrainian</option>
+        <option value="ru"{% if object.stt_language_hint == 'ru' %} selected{% endif %}>ru — Russian</option>
+        <option value="ar"{% if object.stt_language_hint == 'ar' %} selected{% endif %}>ar — Arabic</option>
+        <option value="hi"{% if object.stt_language_hint == 'hi' %} selected{% endif %}>hi — Hindi</option>
+        <option value="ja"{% if object.stt_language_hint == 'ja' %} selected{% endif %}>ja — Japanese</option>
+        <option value="ko"{% if object.stt_language_hint == 'ko' %} selected{% endif %}>ko — Korean</option>
+        <option value="zh"{% if object.stt_language_hint == 'zh' %} selected{% endif %}>zh — Chinese</option>
+        <option value="tr"{% if object.stt_language_hint == 'tr' %} selected{% endif %}>tr — Turkish</option>
+        <option value="sv"{% if object.stt_language_hint == 'sv' %} selected{% endif %}>sv — Swedish</option>
+        <option value="da"{% if object.stt_language_hint == 'da' %} selected{% endif %}>da — Danish</option>
+        <option value="fi"{% if object.stt_language_hint == 'fi' %} selected{% endif %}>fi — Finnish</option>
+        <option value="no"{% if object.stt_language_hint == 'no' %} selected{% endif %}>no — Norwegian</option>
+      </select>
+      <div id="sttLanguageHelp" class="form-text text-light">Auto by default. A specific code is sent only as a hint; auto lets the provider detect the language.</div>
+    </div>
+    <div class="mb-3">
+      <label for="stt_keyword_bias" class="form-label fw-bold fs-5">Keyword Bias (comma-separated)</label>
+      <input type="text" class="form-control" name="stt_keyword_bias" id="stt_keyword_bias" aria-describedby="sttKeywordHelp" value="{{object.stt_keyword_bias}}" placeholder="e.g. Moxie, names, favourite words">
+      <div id="sttKeywordHelp" class="form-text text-light">Optional names/words to bias recognition toward (max 20, letters/digits/space/hyphen/apostrophe). Stored locally and sent only as biasing hints to the streaming session.</div>
+    </div>
+    <div class="mb-3 form-check">
+      <input type="checkbox" class="form-check-input" name="stt_code_switching_enabled" id="stt_code_switching_enabled" aria-describedby="sttCodeSwitchHelp"{% if object.stt_code_switching_enabled %} checked{% endif %}>
+      <label class="form-check-label" for="stt_code_switching_enabled">Enable code-switching (mixed languages in one utterance)</label>
+      <div id="sttCodeSwitchHelp" class="form-text text-light">Off by default. Turn on only for speakers who mix languages mid-sentence.</div>
     </div>
     <div class="mb-3">
       <label for="musetranscribeapikey" class="form-label fw-bold fs-5">(OPTIONAL) Muse Transcribe API Key Override</label>
@@ -93,7 +160,7 @@
     <div class="mb-3 form-text text-light" id="provider_status">
       OpenAI: {% if object.openai_api_key %}key configured{% else %}key not configured{% endif %} ·
       Muse Spark: {% if object.muse_spark_api_key %}key configured{% else %}key not configured{% endif %} ·
-      STT: {% if object.stt_provider == 'muse_transcribe' %}Muse Transcribe (Whisper fallback){% else %}Whisper (OpenAI key){% endif %}
+      STT: {% if object.stt_provider == 'muse_streaming' %}Muse streaming ({% if object.stt_streaming_enabled %}streaming on{% else %}streaming off → one-shot{% endif %}, Whisper fallback){% elif object.stt_provider == 'muse_transcribe' %}Muse Transcribe (Whisper fallback){% else %}Whisper (OpenAI key){% endif %}
     </div>
     <div class="mb-3">
       <label for="googleapikey" class="form-label fw-bold fs-5">(OPTIONAL) Google Service Account Key</label>
@@ -178,10 +245,11 @@ $(document).ready(function() {
       }
     }
     var sttProvider = $('#stt_provider').val();
+    var sttStreamingEnabled = $('#stt_streaming_enabled').is(':checked');
     var museTranscribeKey = $('#musetranscribeapikey').val().trim();
     var museTranscribeKeyStored = {% if object.muse_transcribe_api_key %}true{% else %}false{% endif %};
-    if (validated && sttProvider === 'muse_transcribe' && museSparkKey === '' && !museSparkKeyStored && museTranscribeKey === '' && !museTranscribeKeyStored) {
-      if (!confirm('Muse Transcribe is selected but no Muse key is set — STT will fall back to Whisper until a key is added. Save anyway?')) {
+    if (validated && (sttProvider === 'muse_transcribe' || sttProvider === 'muse_streaming' || sttStreamingEnabled) && museSparkKey === '' && !museSparkKeyStored && museTranscribeKey === '' && !museTranscribeKeyStored) {
+      if (!confirm('Muse STT is selected but no Muse key is set — STT will fall back to Whisper until a key is added. Save anyway?')) {
         event.preventDefault();
         return;
       }

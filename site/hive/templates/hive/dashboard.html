@@ -6,6 +6,15 @@
     <div class="alert alert-primary">{{ alert }}</div>
 {% endif %}
 <div class="p-3">
+{% if stt_status %}
+<h2>Speech-to-Text</h2>
+<table class="table table-striped">
+  <tr><th>Provider / effective mode</th><td>{{stt_status.provider}} / {{stt_status.mode}}{% if stt_status.fell_back %} (Whisper fallback — no Muse key){% endif %}</td></tr>
+  <tr><th>Streaming</th><td>{% if stt_status.streaming_enabled %}on{% else %}off{% endif %} · diarization {% if stt_status.diarization_enabled %}on{% else %}off{% endif %} · code-switching {% if stt_status.code_switching_enabled %}on{% else %}off{% endif %}</td></tr>
+  <tr><th>Endpointing / language</th><td>{{stt_status.endpointing_mode}} ({{stt_status.endpointing_timeout_ms}} ms) · language hint: {{stt_status.language_hint}}</td></tr>
+</table>
+<br>
+{% endif %}
 <h2>Devices</h2>
 <a title="Code to show Moxie to move to this service" class="btn btn-primary btn-sm" role="button" href="{% url 'hive:endpoint_qr' %}">Migration QR Code</a>
 <a title="Create QR with WiFI credentials to get Moxie on a new network" class="btn btn-primary btn-sm" role="button" href="{% url 'hive:wifi_edit' %}">Wifi QR Code</a>

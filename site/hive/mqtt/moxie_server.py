@@ -10,7 +10,7 @@ import logging
 import base64
 import ssl
 import threading
-from .ai_factory import set_global_chat_provider, set_muse_spark_key, set_muse_transcribe_key, set_openai_key, set_stt_provider
+from .ai_factory import set_global_chat_provider, set_muse_spark_key, set_muse_transcribe_key, set_openai_key, set_stt_code_switching_enabled, set_stt_diarization_enabled, set_stt_endpointing_mode, set_stt_endpointing_timeout_ms, set_stt_keyword_bias, set_stt_language_hint, set_stt_provider, set_stt_streaming_enabled
 from .control_commands import behaviour_tree_mark
 from .robot_credentials import RobotCredentials
 from .robot_data import RobotData
@@ -494,6 +494,15 @@ class MoxieServer:
         set_muse_spark_key(getattr(hive_config, "muse_spark_api_key", None) if hive_config else None)
         set_muse_transcribe_key(getattr(hive_config, "muse_transcribe_api_key", None) if hive_config else None)
         set_stt_provider(getattr(hive_config, "stt_provider", "openai") if hive_config else "openai")
+        # Streaming knobs: getattr defaults keep a pre-migration (0021)
+        # row from crashing startup; setters ignore unknown values.
+        set_stt_streaming_enabled(getattr(hive_config, "stt_streaming_enabled", False) if hive_config else False)
+        set_stt_diarization_enabled(getattr(hive_config, "stt_diarization_enabled", False) if hive_config else False)
+        set_stt_endpointing_mode(getattr(hive_config, "stt_endpointing_mode", "auto") if hive_config else "auto")
+        set_stt_endpointing_timeout_ms(getattr(hive_config, "stt_endpointing_timeout_ms", 1000) if hive_config else 1000)
+        set_stt_language_hint(getattr(hive_config, "stt_language_hint", "auto") if hive_config else "auto")
+        set_stt_keyword_bias(getattr(hive_config, "stt_keyword_bias", "") if hive_config else "")
+        set_stt_code_switching_enabled(getattr(hive_config, "stt_code_switching_enabled", False) if hive_config else False)
         set_global_chat_provider(getattr(hive_config, "chat_provider", "openai") if hive_config else "openai")
         self._google_service_account = hive_config.google_api_key if hive_config else None
         self._remote_chat.update_from_database()

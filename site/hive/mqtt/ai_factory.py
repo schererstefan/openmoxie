@@ -13,6 +13,18 @@ factory) and are never logged.
 from openai import OpenAI
 import logging
 
+from .muse_transcribe_streaming import StreamingConfig
+from .stt_knobs import (
+    LANGUAGE_AUTO,
+    VALID_ENDPOINTING_MODES,
+    VALID_LANGUAGE_HINTS,
+    clamp_endpointing_timeout_ms,
+    clean_keyword_items,
+    join_keyword_items,
+    keyword_list_from_stored,
+    parse_bool,
+)
+
 logger = logging.getLogger(__name__)
 
 PROVIDER_OPENAI = "openai"
@@ -30,10 +42,24 @@ _GLOBAL_CHAT_PROVIDER = PROVIDER_OPENAI
 
 # STT provider selection (independent of the chat provider above).
 # Default is OpenAI Whisper-1; Muse Voice Transcribe is opt-in only.
+# ``muse_streaming`` additionally needs the separate streaming switch
+# below; with it off it resolves to the one-shot path (see stt_knobs).
 STT_PROVIDER_OPENAI = "openai"
 STT_PROVIDER_MUSE_TRANSCRIBE = "muse_transcribe"
-STT_PROVIDERS = (STT_PROVIDER_OPENAI, STT_PROVIDER_MUSE_TRANSCRIBE)
+STT_PROVIDER_MUSE_STREAMING = "muse_streaming"
+STT_PROVIDERS = (STT_PROVIDER_OPENAI, STT_PROVIDER_MUSE_TRANSCRIBE, STT_PROVIDER_MUSE_STREAMING)
 _STT_PROVIDER = STT_PROVIDER_OPENAI
+# Streaming knobs (loaded from HiveConfiguration; defaults keep every
+# existing install on the proven paths). Setters below never raise at
+# server load: unknown values are logged and ignored (keeping the
+# current value), matching set_stt_provider.
+_STT_STREAMING_ENABLED = False
+_STT_DIARIZATION_ENABLED = False
+_STT_ENDPOINTING_MODE = "auto"
+_STT_ENDPOINTING_TIMEOUT_MS = 1000
+_STT_LANGUAGE_HINT = LANGUAGE_AUTO
+_STT_KEYWORD_BIAS = ""
+_STT_CODE_SWITCHING_ENABLED = False
 # Optional per-STT override key. When unset/blank, Transcribe reuses the
 # Muse Spark key: both are Meta Model API keys on the same base URL
 # (https://api.meta.ai/v1) with Bearer auth, so a Spark key is expected
@@ -61,11 +87,13 @@ def has_muse_transcribe_key():
 
 
 def normalize_stt_provider(provider):
-    """Canonical ``openai``/``muse_transcribe`` string for an STT value."""
+    """Canonical STT provider string for an STT value."""
     value = getattr(provider, "value", provider)
     text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
     if text in (STT_PROVIDER_OPENAI, "whisper", "whisper_1"):
         return STT_PROVIDER_OPENAI
+    if text in (STT_PROVIDER_MUSE_STREAMING, "muse_voice_transcribe_streaming", "muse_transcribe_streaming"):
+        return STT_PROVIDER_MUSE_STREAMING
     if text in (STT_PROVIDER_MUSE_TRANSCRIBE, "muse_voice_transcribe"):
         return STT_PROVIDER_MUSE_TRANSCRIBE
     raise ValueError(f"Unknown STT provider: {provider!r}")
@@ -105,6 +133,10 @@ def resolve_stt_provider_detailed(provider=None):
         candidate = _STT_PROVIDER
     if candidate == STT_PROVIDER_OPENAI:
         return STT_PROVIDER_OPENAI, False, "openai_default"
+    if candidate == STT_PROVIDER_MUSE_STREAMING:
+        if has_muse_transcribe_key():
+            return STT_PROVIDER_MUSE_STREAMING, False, "muse_streaming"
+        return STT_PROVIDER_OPENAI, True, "whisper_fallback_no_key"
     if has_muse_transcribe_key():
         return STT_PROVIDER_MUSE_TRANSCRIBE, False, "muse_transcribe"
     return STT_PROVIDER_OPENAI, True, "whisper_fallback_no_key"
@@ -114,6 +146,119 @@ def resolve_stt_provider(provider=None):
     """Backward-compatible wrapper returning only the provider string."""
     resolved, _fell_back, _source = resolve_stt_provider_detailed(provider=provider)
     return resolved
+
+
+def set_stt_streaming_enabled(enabled):
+    global _STT_STREAMING_ENABLED
+    _STT_STREAMING_ENABLED = parse_bool(enabled)
+
+
+def get_stt_streaming_enabled():
+    return _STT_STREAMING_ENABLED
+
+
+def set_stt_diarization_enabled(enabled):
+    global _STT_DIARIZATION_ENABLED
+    _STT_DIARIZATION_ENABLED = parse_bool(enabled)
+
+
+def get_stt_diarization_enabled():
+    return _STT_DIARIZATION_ENABLED
+
+
+def set_stt_endpointing_mode(mode):
+    """Store the endpointing mode; unknown values keep the current one."""
+    global _STT_ENDPOINTING_MODE
+    candidate = str(mode).strip().lower() if mode is not None else ""
+    if candidate in VALID_ENDPOINTING_MODES:
+        _STT_ENDPOINTING_MODE = candidate
+    else:
+        logger.warning(
+            "Ignoring unknown STT endpointing mode %r; keeping %s",
+            mode, _STT_ENDPOINTING_MODE)
+
+
+def get_stt_endpointing_mode():
+    return _STT_ENDPOINTING_MODE
+
+
+def set_stt_endpointing_timeout_ms(timeout_ms):
+    """Store the endpointing timeout (clamped); garbage keeps current."""
+    global _STT_ENDPOINTING_TIMEOUT_MS
+    if timeout_ms is None or (isinstance(timeout_ms, str) and not timeout_ms.strip()):
+        return
+    clamped, ok = clamp_endpointing_timeout_ms(timeout_ms)
+    if not ok:
+        try:
+            int(timeout_ms)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Ignoring unparseable STT endpointing timeout %r; keeping %s",
+                timeout_ms, _STT_ENDPOINTING_TIMEOUT_MS)
+            return
+    _STT_ENDPOINTING_TIMEOUT_MS = clamped
+
+
+def get_stt_endpointing_timeout_ms():
+    return _STT_ENDPOINTING_TIMEOUT_MS
+
+
+def set_stt_language_hint(hint):
+    """Store the language hint; unknown values keep the current one."""
+    global _STT_LANGUAGE_HINT
+    if hint is None:
+        _STT_LANGUAGE_HINT = LANGUAGE_AUTO
+        return
+    candidate = str(hint).strip().lower()
+    if not candidate:
+        _STT_LANGUAGE_HINT = LANGUAGE_AUTO
+    elif candidate in VALID_LANGUAGE_HINTS:
+        _STT_LANGUAGE_HINT = candidate
+    else:
+        logger.warning(
+            "Ignoring unknown STT language hint %r; keeping %s",
+            hint, _STT_LANGUAGE_HINT)
+
+
+def get_stt_language_hint():
+    return _STT_LANGUAGE_HINT
+
+
+def set_stt_keyword_bias(value):
+    """Store cleaned/capped keyword bias text; never raises."""
+    global _STT_KEYWORD_BIAS
+    items, _changed = clean_keyword_items(value)
+    _STT_KEYWORD_BIAS = join_keyword_items(items)
+
+
+def get_stt_keyword_bias():
+    return _STT_KEYWORD_BIAS
+
+
+def get_stt_keyword_list():
+    """Keyword bias items as a list (re-validated from the stored text)."""
+    return list(keyword_list_from_stored(_STT_KEYWORD_BIAS))
+
+
+def set_stt_code_switching_enabled(enabled):
+    global _STT_CODE_SWITCHING_ENABLED
+    _STT_CODE_SWITCHING_ENABLED = parse_bool(enabled)
+
+
+def get_stt_code_switching_enabled():
+    return _STT_CODE_SWITCHING_ENABLED
+
+
+def get_stt_streaming_config():
+    """StreamingConfig from the loaded knobs (``'auto'`` -> ``None``)."""
+    return StreamingConfig(
+        diarization=_STT_DIARIZATION_ENABLED,
+        language_hint=None if _STT_LANGUAGE_HINT == LANGUAGE_AUTO else _STT_LANGUAGE_HINT,
+        keyword_bias=keyword_list_from_stored(_STT_KEYWORD_BIAS),
+        code_switching=_STT_CODE_SWITCHING_ENABLED,
+        endpointing_mode=_STT_ENDPOINTING_MODE,
+        endpointing_timeout_ms=_STT_ENDPOINTING_TIMEOUT_MS,
+    )
 
 
 def set_openai_key(key):
