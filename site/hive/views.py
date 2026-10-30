@@ -15,7 +15,7 @@ from PIL import Image
 from io import BytesIO
 
 from . import logtail
-from .models import CHAT_PROVIDER_MUSE_SPARK, CHAT_PROVIDER_OPENAI, MUSE_SPARK_MODELS, GlobalResponse, SinglePromptChat, MoxieDevice, MoxieSchedule, HiveConfiguration, MentorBehavior
+from .models import CHAT_PROVIDER_MUSE_SPARK, CHAT_PROVIDER_OPENAI, MUSE_SPARK_MODELS, STT_PROVIDER_MUSE_TRANSCRIBE, STT_PROVIDER_OPENAI, GlobalResponse, SinglePromptChat, MoxieDevice, MoxieSchedule, HiveConfiguration, MentorBehavior
 from .content.data import DM_MISSION_CONTENT_IDS, get_moxie_customization_groups
 from .data_import import update_import_status, import_content
 from .mqtt.moxie_server import get_instance
@@ -84,6 +84,15 @@ def hive_configure(request):
     muse_spark_model = request.POST.get('muse_spark_model')
     if muse_spark_model in MUSE_SPARK_MODELS:
         cfg.muse_spark_model = muse_spark_model
+    # STT provider (additive; default Whisper, opt-in Muse Transcribe).
+    # Transcribe override key: blank means keep (and blank stored means
+    # reuse the Muse Spark key -- see ai_factory.get_muse_transcribe_key).
+    stt_provider = request.POST.get('stt_provider')
+    if stt_provider in (STT_PROVIDER_OPENAI, STT_PROVIDER_MUSE_TRANSCRIBE):
+        cfg.stt_provider = stt_provider
+    muse_transcribe_key = request.POST.get('musetranscribeapikey')
+    if muse_transcribe_key:
+        cfg.muse_transcribe_api_key = muse_transcribe_key
     cfg.external_host = request.POST['hostname']
     cfg.allow_unverified_bots = request.POST.get('allowall') == "on"
     # Bootstrap any default data if not present

@@ -2,8 +2,10 @@
 
 GPT stays the default everywhere. Muse Spark is chat-only and opt-in via
 ``HiveConfiguration.chat_provider`` / ``SinglePromptChat.vendor``. Speech-to-text
-never uses this module's chat dispatch: ``zmq_stt_handler`` keeps calling
-``create_openai()`` explicitly so Whisper stays on OpenAI even when chat is Spark.
+is independent of the chat provider: it defaults to OpenAI Whisper-1 and
+switches to Muse Voice Transcribe only when ``HiveConfiguration.stt_provider``
+is ``muse_transcribe`` (see ``muse_transcribe.py``). Whisper remains the
+fallback whenever Transcribe is unavailable or fails for an utterance.
 
 Keys are held in module globals (same pattern as the original OpenAI-only
 factory) and are never logged.
@@ -25,6 +27,93 @@ CHAT_TIMEOUT_SECONDS = 20.0
 _OPENAPI_KEY = None
 _MUSE_SPARK_KEY = None
 _GLOBAL_CHAT_PROVIDER = PROVIDER_OPENAI
+
+# STT provider selection (independent of the chat provider above).
+# Default is OpenAI Whisper-1; Muse Voice Transcribe is opt-in only.
+STT_PROVIDER_OPENAI = "openai"
+STT_PROVIDER_MUSE_TRANSCRIBE = "muse_transcribe"
+STT_PROVIDERS = (STT_PROVIDER_OPENAI, STT_PROVIDER_MUSE_TRANSCRIBE)
+_STT_PROVIDER = STT_PROVIDER_OPENAI
+# Optional per-STT override key. When unset/blank, Transcribe reuses the
+# Muse Spark key: both are Meta Model API keys on the same base URL
+# (https://api.meta.ai/v1) with Bearer auth, so a Spark key is expected
+# to authorise Transcribe too. Live scope confirmation is still pending
+# (see CHECKPOINT-STT-SWAP.md); if a live Spark key is ever rejected by
+# the Transcribe endpoint, entering this override is the fix, no code
+# change needed. This value, like every key here, is never logged.
+_MUSE_TRANSCRIBE_KEY_OVERRIDE = None
+
+
+def set_muse_transcribe_key(key):
+    global _MUSE_TRANSCRIBE_KEY_OVERRIDE
+    _MUSE_TRANSCRIBE_KEY_OVERRIDE = key
+
+
+def get_muse_transcribe_key():
+    """Effective Transcribe key: explicit override, else the Spark key."""
+    if _key_present(_MUSE_TRANSCRIBE_KEY_OVERRIDE):
+        return _MUSE_TRANSCRIBE_KEY_OVERRIDE
+    return _MUSE_SPARK_KEY
+
+
+def has_muse_transcribe_key():
+    return _key_present(get_muse_transcribe_key())
+
+
+def normalize_stt_provider(provider):
+    """Canonical ``openai``/``muse_transcribe`` string for an STT value."""
+    value = getattr(provider, "value", provider)
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if text in (STT_PROVIDER_OPENAI, "whisper", "whisper_1"):
+        return STT_PROVIDER_OPENAI
+    if text in (STT_PROVIDER_MUSE_TRANSCRIBE, "muse_voice_transcribe"):
+        return STT_PROVIDER_MUSE_TRANSCRIBE
+    raise ValueError(f"Unknown STT provider: {provider!r}")
+
+
+def set_stt_provider(provider):
+    """Store the STT provider (loaded from HiveConfiguration.stt_provider).
+
+    An unknown value is logged and ignored (keeping the current/default
+    provider) so a corrupt config row cannot prevent server startup.
+    """
+    global _STT_PROVIDER
+    try:
+        _STT_PROVIDER = normalize_stt_provider(provider)
+    except ValueError:
+        logger.error("Ignoring unknown STT provider %r; keeping %s", provider, _STT_PROVIDER)
+
+
+def get_stt_provider():
+    return _STT_PROVIDER
+
+
+def resolve_stt_provider_detailed(provider=None):
+    """Resolve the effective STT provider with provenance.
+
+    Returns ``(provider, fell_back, source)`` where ``source`` is one of
+    ``"openai_default"`` (Whisper is the configured provider),
+    ``"muse_transcribe"`` (Transcribe configured and its key present) or
+    ``"whisper_fallback_no_key"`` (Transcribe configured but no key, so
+    this utterance must use Whisper instead). A missing Transcribe key
+    never raises and never drops the utterance; the runtime fallback in
+    ``zmq_stt_handler`` covers Transcribe *errors* on top of this.
+    """
+    if provider is not None:
+        candidate = normalize_stt_provider(provider)
+    else:
+        candidate = _STT_PROVIDER
+    if candidate == STT_PROVIDER_OPENAI:
+        return STT_PROVIDER_OPENAI, False, "openai_default"
+    if has_muse_transcribe_key():
+        return STT_PROVIDER_MUSE_TRANSCRIBE, False, "muse_transcribe"
+    return STT_PROVIDER_OPENAI, True, "whisper_fallback_no_key"
+
+
+def resolve_stt_provider(provider=None):
+    """Backward-compatible wrapper returning only the provider string."""
+    resolved, _fell_back, _source = resolve_stt_provider_detailed(provider=provider)
+    return resolved
 
 
 def set_openai_key(key):

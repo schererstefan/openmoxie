@@ -16,6 +16,17 @@ CHAT_PROVIDER_CHOICES = [
     (CHAT_PROVIDER_MUSE_SPARK, "Muse Spark (Meta)"),
 ]
 
+# STT provider choices. Values mirror hive.mqtt.ai_factory
+# STT_PROVIDER_OPENAI / STT_PROVIDER_MUSE_TRANSCRIBE; Whisper (openai)
+# is always the default, Muse Transcribe is opt-in, and chat provider
+# selection never changes STT.
+STT_PROVIDER_OPENAI = "openai"
+STT_PROVIDER_MUSE_TRANSCRIBE = "muse_transcribe"
+STT_PROVIDER_CHOICES = [
+    (STT_PROVIDER_OPENAI, "Whisper (OpenAI)"),
+    (STT_PROVIDER_MUSE_TRANSCRIBE, "Muse Transcribe (Meta)"),
+]
+
 # Muse Spark model offered by the setup page. The standard model is the
 # default; the contributor variant is an explicit, non-default choice only
 # (its conversation content is handled under different data-use terms).
@@ -94,6 +105,13 @@ class HiveConfiguration(models.Model):
     chat_provider = models.CharField(max_length=32, choices=CHAT_PROVIDER_CHOICES, default=CHAT_PROVIDER_OPENAI)
     muse_spark_api_key = models.TextField(null=True, blank=True, default='')
     muse_spark_model = models.CharField(max_length=200, default=MUSE_SPARK_MODEL_STANDARD)
+    # STT provider, independent of chat_provider. Default Whisper (openai);
+    # muse_transcribe is opt-in and falls back to Whisper per utterance.
+    # muse_transcribe_api_key is an OPTIONAL override: blank means reuse
+    # the Muse Spark key (same Meta Model API key family). Blank means
+    # keep on the setup page, matching the other key fields.
+    stt_provider = models.CharField(max_length=32, choices=STT_PROVIDER_CHOICES, default=STT_PROVIDER_OPENAI)
+    muse_transcribe_api_key = models.TextField(null=True, blank=True, default='')
     external_host = models.CharField(max_length=255, null=True, blank=True, default='')
     allow_unverified_bots = models.BooleanField(default=False)
     google_api_key = models.TextField(null=True, blank=True, default='')

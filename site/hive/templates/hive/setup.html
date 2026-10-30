@@ -62,7 +62,20 @@
         <option value="openai"{% if not object.chat_provider or object.chat_provider == 'openai' %} selected{% endif %}>GPT (OpenAI) — default</option>
         <option value="muse_spark"{% if object.chat_provider == 'muse_spark' %} selected{% endif %}>Muse Spark (Meta)</option>
       </select>
-      <div id="chatProviderHelp" class="form-text text-light">Applies to new chat sessions. GPT remains the default; Muse Spark is opt-in. Speech-to-Text (Whisper) always uses the OpenAI key.</div>
+      <div id="chatProviderHelp" class="form-text text-light">Applies to new chat sessions. GPT remains the default; Muse Spark is opt-in. STT is independent of chat (see Speech-to-Text below).</div>
+    </div>
+    <div class="mb-3">
+      <label for="stt_provider" class="form-label fw-bold fs-5">Speech-to-Text Provider</label>
+      <select class="form-control" name="stt_provider" id="stt_provider" aria-describedby="sttProviderHelp">
+        <option value="openai"{% if not object.stt_provider or object.stt_provider == 'openai' %} selected{% endif %}>Whisper (OpenAI) — default</option>
+        <option value="muse_transcribe"{% if object.stt_provider == 'muse_transcribe' %} selected{% endif %}>Muse Transcribe (Meta) — opt-in, one-shot</option>
+      </select>
+      <div id="sttProviderHelp" class="form-text text-light">Whole-utterance only (streaming realtime is a follow-up, not implemented). Muse Transcribe reuses the Muse Spark key unless an override key is entered below, and falls back to Whisper for any utterance Transcribe fails on. Whisper-1 is deprecated and leaves the OpenAI API on Feb 26, 2027.</div>
+    </div>
+    <div class="mb-3">
+      <label for="musetranscribeapikey" class="form-label fw-bold fs-5">(OPTIONAL) Muse Transcribe API Key Override</label>
+      <input type="password" autocomplete="off" class="form-control" name="musetranscribeapikey" id="musetranscribeapikey" aria-describedby="museTranscribeApiHelp" placeholder="{% if object.muse_transcribe_api_key %}[Key exists and will be kept unless overridden.]{% else %}Leave blank to reuse the Muse Spark key.{% endif %}">
+      <div id="museTranscribeApiHelp" class="form-text text-light">Only needed if the Muse Spark key is ever rejected by the Transcribe endpoint. Stored in your local database, used only on this computer for STT. Never sent to the robot.</div>
     </div>
     <div class="mb-3">
       <label for="musesparkapikey" class="form-label fw-bold fs-5">(OPTIONAL) Muse Spark API Key</label>
@@ -80,7 +93,7 @@
     <div class="mb-3 form-text text-light" id="provider_status">
       OpenAI: {% if object.openai_api_key %}key configured{% else %}key not configured{% endif %} ·
       Muse Spark: {% if object.muse_spark_api_key %}key configured{% else %}key not configured{% endif %} ·
-      STT (Whisper): uses the OpenAI key
+      STT: {% if object.stt_provider == 'muse_transcribe' %}Muse Transcribe (Whisper fallback){% else %}Whisper (OpenAI key){% endif %}
     </div>
     <div class="mb-3">
       <label for="googleapikey" class="form-label fw-bold fs-5">(OPTIONAL) Google Service Account Key</label>
@@ -160,6 +173,15 @@ $(document).ready(function() {
     var museSparkKeyStored = {% if object.muse_spark_api_key %}true{% else %}false{% endif %};
     if (validated && chatProvider === 'muse_spark' && museSparkKey === '' && !museSparkKeyStored) {
       if (!confirm('Muse Spark is selected but no Muse Spark key is set — chat will speak an error until a key is added. Save anyway?')) {
+        event.preventDefault();
+        return;
+      }
+    }
+    var sttProvider = $('#stt_provider').val();
+    var museTranscribeKey = $('#musetranscribeapikey').val().trim();
+    var museTranscribeKeyStored = {% if object.muse_transcribe_api_key %}true{% else %}false{% endif %};
+    if (validated && sttProvider === 'muse_transcribe' && museSparkKey === '' && !museSparkKeyStored && museTranscribeKey === '' && !museTranscribeKeyStored) {
+      if (!confirm('Muse Transcribe is selected but no Muse key is set — STT will fall back to Whisper until a key is added. Save anyway?')) {
         event.preventDefault();
         return;
       }

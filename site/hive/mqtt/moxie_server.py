@@ -10,7 +10,7 @@ import logging
 import base64
 import ssl
 import threading
-from .ai_factory import set_global_chat_provider, set_muse_spark_key, set_openai_key
+from .ai_factory import set_global_chat_provider, set_muse_spark_key, set_muse_transcribe_key, set_openai_key, set_stt_provider
 from .control_commands import behaviour_tree_mark
 from .robot_credentials import RobotCredentials
 from .robot_data import RobotData
@@ -492,6 +492,8 @@ class MoxieServer:
         hive_config = HiveConfiguration.objects.filter(name="default").first()
         set_openai_key(hive_config.openai_api_key if hive_config else None)
         set_muse_spark_key(getattr(hive_config, "muse_spark_api_key", None) if hive_config else None)
+        set_muse_transcribe_key(getattr(hive_config, "muse_transcribe_api_key", None) if hive_config else None)
+        set_stt_provider(getattr(hive_config, "stt_provider", "openai") if hive_config else "openai")
         set_global_chat_provider(getattr(hive_config, "chat_provider", "openai") if hive_config else "openai")
         self._google_service_account = hive_config.google_api_key if hive_config else None
         self._remote_chat.update_from_database()
