@@ -225,7 +225,7 @@ class BridgeController:
         return self.robot_state
 
     # -- wake / sleep / interrupt ------------------------------------
-    def wake(self, device_id="mock-device"):
+    def _check_wake_allowed(self):
         if self.mode != MODE_BRIDGE:
             raise ValueError("bridge mode is off; wake is stock Moxie behaviour")
         if self.robot_state in (STATE_STANDBY, STATE_UNKNOWN):
@@ -233,22 +233,49 @@ class BridgeController:
                 "cannot wake from standby-disconnected; use local voice, "
                 "touch, power, or a pre-set alarm timer"
             )
+
+    def wake(self, device_id="mock-device"):
+        self._check_wake_allowed()
         self.transport.send_wakeup(device_id)
         self.robot_state = STATE_AWAKE
         greeting = build_wake_greeting(self.user_name)
         greeting["transport"] = "telehealth"
+        greeting["intent"] = "wake"
+        return greeting
+
+    def wake_turn(self):
+        """Publish-free wake turn for wiring callers.
+
+        Same MQTT-gated checks as wake(), but never touches the
+        transport: it returns the greeting turn and the caller (the
+        wiring layer) turns it into a control action dict. Nothing
+        is published from here.
+        """
+        self._check_wake_allowed()
+        self.robot_state = STATE_AWAKE
+        greeting = build_wake_greeting(self.user_name)
+        greeting["transport"] = "telehealth"
+        greeting["intent"] = "wake"
         return greeting
 
     def sleep(self):
         self.robot_state = STATE_SLEEPING
         self.interrupt_sessions()
         return {"command": "sleep", "transport": "remote_chat",
+                "intent": "sleep",
                 "speech": "Goodnight, Stefan. I will rest now.",
                 "interruptible": True}
 
     def interrupt(self):
         self.interrupt_sessions()
-        return {"command": "interrupt", "interruptible": True}
+        return {"command": "interrupt", "intent": "interrupt",
+                "interruptible": True}
+
+    def control_actions_for(self, turn, allow_dance=False):
+        """Translate one bridge turn via the wiring layer (no publish)."""
+        from .bridge_control_wiring import turn_to_control_actions
+        return turn_to_control_actions(
+            turn, robot_state=self.robot_state, allow_dance=allow_dance)
 
     def interrupt_sessions(self):
         self.gestures.interrupt()
@@ -271,7 +298,7 @@ class BridgeController:
                     allow_stock_fallback=False):
         """Route one STT transcript to exactly one robot-bound turn."""
         if self.mode != MODE_BRIDGE:
-            return {"command": "stock", "mode": MODE_STOCK,
+            return {"command": "stock", "mode": MODE_STOCK, "intent": "stock",
                     "note": "bridge off; stock Moxie handles this turn"}
         low = _clean(transcript)
         self.turns += 1
@@ -285,11 +312,13 @@ class BridgeController:
                 raise ValueError("dance requires robot_state='awake'")
             turn = self.dance.start(robot_state=self.robot_state)
             turn["transport"] = "telehealth"
+            turn["intent"] = "dance"
             return turn
         for cue in GESTURE_CUES:
             if cue in low:
                 turn = build_gesture_turn(cue)
                 turn["transport"] = "telehealth"
+                turn["intent"] = "gesture"
                 return turn
         if "celebrate" in low:
             if self._celebration is None:
@@ -298,19 +327,24 @@ class BridgeController:
             if self.celebration_index >= len(self._celebration):
                 self._celebration = None
                 self.celebration_index = 0
-                return _speech("Celebration complete, Stefan.", "happy", 0.5)
+                done = _speech("Celebration complete, Stefan.", "happy", 0.5)
+                done["intent"] = "celebrate"
+                return done
             turn = self._celebration[self.celebration_index]
             self.celebration_index += 1
             turn["transport"] = "telehealth"
+            turn["intent"] = "celebrate"
             return turn
         if low.startswith("show me"):
             turn = self.show_me.start()
             turn["transport"] = "telehealth"
+            turn["intent"] = "show_me"
             return turn
         if self.show_me.state == "awaiting_show":
             received = self.show_me.receive(transcript.strip())
             ack = self.show_me.acknowledge()
             ack["transport"] = "telehealth"
+            ack["intent"] = "show_me"
             ack["shown_description"] = received["description"]
             ack["stored_on_disk"] = False
             return ack
@@ -319,39 +353,47 @@ class BridgeController:
                 "Once, a small robot woke up and listened, Stefan.", "happy", 0.5
             )
             beat["transport"] = "telehealth"
+            beat["intent"] = "story"
             return beat
         if "calendar" in low or "my day" in low or "tomorrow" in low:
             answer = self.tools.call("calendar")
             turn = _speech(answer, "happy", 0.5)
             turn["transport"] = "telehealth"
+            turn["intent"] = "tool"
             turn["tool"] = "calendar"
             return turn
         if "weather" in low:
             answer = self.tools.call("weather")
             turn = _speech(answer, "happy", 0.5)
             turn["transport"] = "telehealth"
+            turn["intent"] = "tool"
             turn["tool"] = "weather"
             return turn
         for intent in ACTION_INTENTS:
             if intent in low:
-                return _speech(
+                refused = _speech(
                     "I will not do that from Moxie without your explicit "
                     "confirmation, Stefan. That action is not in the "
                     "read-only bridge.", "concerned", 0.5,
                 )
+                refused["intent"] = "refusal"
+                return refused
         if self.agent is None:
             if allow_stock_fallback:
-                return {"command": "stock_fallback",
+                return {"command": "stock_fallback", "intent": "stock",
                         "note": "explicit fallback requested; stock GPT only"}
-            return _speech(
+            absent = _speech(
                 "The my croft bridge is on, but no Mycroft agent is "
                 "connected yet, Stefan. I am not falling back to stock "
                 "Moxie silently.", "concerned", 0.5,
             )
+            absent["intent"] = "chat"
+            return absent
         reply = self.agent.answer(transcript, {"user": self.user_name,
                                                "turns": self.turns})
         turn = _speech(reply.speech, reply.mood, reply.intensity)
         if reply.gesture_cue:
             turn["gesture_turn"] = build_gesture_turn(reply.gesture_cue)
         turn["transport"] = "telehealth"
+        turn["intent"] = "chat"
         return turn
