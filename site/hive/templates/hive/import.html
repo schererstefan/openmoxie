@@ -1,7 +1,6 @@
 {% extends 'base.html' %}
 {% load static %}
 {% block content %}
-<div class="moxheader"><a href="{% url 'hive:dashboard' %}"><img class="moximage" src="{% static 'hive/openmoxie_logo.svg' %}"></a>OpenMoxie<span class="moxversion">{{moxie_version}}</span></div>
 <div class="p-3">
 <h2>Import Moxie Content</h2>
 <p>
@@ -57,7 +56,6 @@ The badge next to each piece of content explains what will change if you select 
 </form>
 <br>
 <h2>Details</h2>
-<script defer src="https://unpkg.com/pretty-json-custom-element/index.js"></script>
-<pretty-json expand="0" unsafe="true" truncate-string="3000">{{json_data_str}}</pretty-json>
+<pre class="json-view">{{json_data_str}}</pre>
 </div>    
 {% endblock %}

@@ -1,16 +1,14 @@
 {% extends 'base.html' %}
 {% load static %}
 {% block content %}
-<div class="moxheader"><a href="{% url 'hive:dashboard' %}"><img class="moximage" src="{% static 'hive/openmoxie_logo.svg' %}"></a>OpenMoxie<span class="moxversion">{{moxie_version}}</span></div>
-<div class="text-bg-secondary p-3">
 <h1>Welcome to OpenMoxie!</h1>
 <p>
     The OpenMoxie service allows this computer to act as a replacement for Moxie's cloud infrastructure.
 </p>
-<div class="half text-bg-danger p-3">
+<div class="alert alert-danger" role="alert">
   <p>
     <strong>Please read carefully!</strong> This implementation has minimal security and should always be operated on a LAN behind a firewall that protects
-  ports <strong>8883</strong> and <strong>8001</strong> from the Internet.  API keys and service accounts are stored
+  ports <strong>8883</strong> and <strong>8001</strong> from the Internet. API keys and service accounts are stored
   unencrypted in the host file system.
   </p>
   <ul>
@@ -20,85 +18,93 @@
     <li>If you connect a Google Service Account Key, the key itself will be shared with devices connecting on port <strong>8883</strong>.</li>
   </ul>
 </div>
-<p></p>
-<h3>Getting Your Own OpenAI API Key</h3>
+<h2>Getting Your Own OpenAI API Key</h2>
 <p>
-  There are a few requirements to setup before you can use this with your Moxie.  The primary requirement
+  There are a few requirements to setup before you can use this with your Moxie. The primary requirement
   is your own personal API key from OpenAI to use for Moxie Chat and the default Speech-to-Text processing.
   These services are not free and you will be responsible for managing your OpenAI account to ensure
   it has sufficient credits, however Whisper is very inexpensive and the default conversational model
   (3.5 turbo) is a very economical model.
 </p>
 <p>
-    You will need to visit <a class="link-light" target="_blank" href="https://platform.openai.com/settings/organization/billing/overview">OpenAI Billing</a> page, 
-    create an account, add your credit card, and purchase some credits.  We recommend
+    You will need to visit <a target="_blank" rel="noopener" href="https://platform.openai.com/settings/organization/billing/overview">OpenAI Billing</a> page,
+    create an account, add your credit card, and purchase some credits. We recommend
     starting with a small amount such as $10 and keeping an eye on your usage until you understand the costs, though they are typically modest.
 </p>
 <p>
-    Next, visit the <a class="link-light" target="_blank" href="https://platform.openai.com/settings/organization/api-keys">OpenAI API Keys</a> to create a unique
-    API key (secret key) for use with OpenMoxie.  Give it a nice name like "Moxie Services" and save the API key to paste into the form below.
+    Next, visit the <a target="_blank" rel="noopener" href="https://platform.openai.com/settings/organization/api-keys">OpenAI API Keys</a> to create a unique
+    API key (secret key) for use with OpenMoxie. Give it a nice name like "Moxie Services" and save the API key to paste into the form below.
 </p>
-<h3>Using Google Speech Instead</h3>
+<h2>Using Google Speech Instead</h2>
 <p>
   OpenMoxie is configured to use OpenAI Whisper for Speech-to-Text by default for simplicity and lower cost, but Google Speech is more
-  responsive and generally works better with Moxie's internal speech processing.  Google also offers free credits when you sign-up.
+  responsive and generally works better with Moxie's internal speech processing. Google also offers free credits when you sign-up.
   If you would rather use Google for Speech-to-Text services
-  you can include a service account key with permissions to use Google Speech in the form below.  This key will be provided to Moxie and used if you
-  set <kbd>"stt": "0"</kbd> in the robot settings.  Visit <a class="link-light" target="_blank" href="https://cloud.google.com/">Google Cloud Platform</a> for details
+  you can include a service account key with permissions to use Google Speech in the form below. This key will be provided to Moxie and used if you
+  set <kbd>"stt": "0"</kbd> in the robot settings. Visit <a target="_blank" rel="noopener" href="https://cloud.google.com/">Google Cloud Platform</a> for details
   on Google's offering.
 </p>
-<hr>
-<h1>Configuration</h1>
+<h2>Configuration</h2>
+<p class="form-text">Key fields never show a stored key value — a placeholder only says
+whether a key is already stored. Leaving a key field blank keeps the stored key.</p>
 <form id="hive_edit" action="{% url 'hive:hive_configure' %}" method="post">
     {% csrf_token %}
+    <fieldset>
+    <legend>Chat</legend>
     <div class="mb-3">
-      <label for="apikey" class="form-label fw-bold fs-5">OpenAI API Key</label>
-      <input type="text" class="form-control" name="apikey" id="apikey" aria-describedby="apiHelp" placeholder="{% if object.openai_api_key %}[Key exists and will be kept unless overridden.]{% else %}Paste OpenAI API key.{% endif %}">
-      <div id="apiHelp" class="form-text text-light">This be be stored in your local database and used locally for AI and Speech services.</div>
-    </div>
-    <div class="mb-3">
-      <label for="chat_provider" class="form-label fw-bold fs-5">Chat Provider</label>
+      <label for="chat_provider" class="form-label">Chat Provider</label>
       <select class="form-control" name="chat_provider" id="chat_provider" aria-describedby="chatProviderHelp">
         <option value="openai"{% if not object.chat_provider or object.chat_provider == 'openai' %} selected{% endif %}>GPT (OpenAI) — default</option>
         <option value="muse_spark"{% if object.chat_provider == 'muse_spark' %} selected{% endif %}>Muse Spark (Meta)</option>
       </select>
-      <div id="chatProviderHelp" class="form-text text-light">Applies to new chat sessions. GPT remains the default; Muse Spark is opt-in. STT is independent of chat (see Speech-to-Text below).</div>
+      <div id="chatProviderHelp" class="form-text">Applies to new chat sessions. GPT remains the default; Muse Spark is opt-in. STT is independent of chat (see Speech-to-Text below).</div>
     </div>
     <div class="mb-3">
-      <label for="stt_provider" class="form-label fw-bold fs-5">Speech-to-Text Provider</label>
+      <label for="muse_spark_model" class="form-label">Muse Spark Model</label>
+      <select class="form-control" name="muse_spark_model" id="muse_spark_model" aria-describedby="museSparkModelHelp">
+        <option value="muse-spark-1.3"{% if not object.muse_spark_model or object.muse_spark_model == 'muse-spark-1.3' %} selected{% endif %}>muse-spark-1.3 (standard)</option>
+        <option value="muse-spark-1.3-contributor"{% if object.muse_spark_model == 'muse-spark-1.3-contributor' %} selected{% endif %}>muse-spark-1.3-contributor</option>
+      </select>
+      <div id="museSparkModelHelp" class="form-text">The contributor variant operates under different data-use terms than the standard Muse Spark model, so conversation content sent to it is handled under those contributor terms rather than the standard terms — stay on muse-spark-1.3 (or GPT) unless you have read and accepted the contributor terms.</div>
+    </div>
+    </fieldset>
+    <fieldset>
+    <legend>Speech-to-Text</legend>
+    <div class="mb-3">
+      <label for="stt_provider" class="form-label">Speech-to-Text Provider</label>
       <select class="form-control" name="stt_provider" id="stt_provider" aria-describedby="sttProviderHelp">
         <option value="openai"{% if not object.stt_provider or object.stt_provider == 'openai' %} selected{% endif %}>Whisper (OpenAI) — default</option>
         <option value="muse_transcribe"{% if object.stt_provider == 'muse_transcribe' %} selected{% endif %}>Muse Transcribe (Meta) — opt-in, one-shot</option>
         <option value="muse_streaming"{% if object.stt_provider == 'muse_streaming' %} selected{% endif %}>Muse Transcribe streaming (Meta) — opt-in</option>
       </select>
-      <div id="sttProviderHelp" class="form-text text-light">One-shot stays the fallback mode: streaming is off by default until verified live, diarization is off by default, and language is auto by default. Muse Transcribe (one-shot and streaming) reuses the Muse Spark key unless an override key is entered below. Fallback chain per utterance: streaming (when enabled) → one-shot Transcribe → Whisper-1, then the usual error reply — a voice turn is never dropped silently. Whisper-1 is deprecated and leaves the OpenAI API on Feb 26, 2027.</div>
+      <div id="sttProviderHelp" class="form-text">One-shot stays the fallback mode: streaming is off by default until verified live, diarization is off by default, and language is auto by default. Muse Transcribe (one-shot and streaming) reuses the Muse Spark key unless an override key is entered below. Fallback chain per utterance: streaming (when enabled) → one-shot Transcribe → Whisper-1, then the usual error reply — a voice turn is never dropped silently. Whisper-1 is deprecated and leaves the OpenAI API on Feb 26, 2027.</div>
     </div>
     <div class="mb-3 form-check">
       <input type="checkbox" class="form-check-input" name="stt_streaming_enabled" id="stt_streaming_enabled" aria-describedby="sttStreamingHelp"{% if object.stt_streaming_enabled %} checked{% endif %}>
       <label class="form-check-label" for="stt_streaming_enabled">Enable streaming realtime STT (separate switch; streaming only takes effect when provider is Muse streaming)</label>
-      <div id="sttStreamingHelp" class="form-text text-light">Off by default. With streaming off, the Muse streaming provider uses the one-shot path. Partial transcripts are never sent to the robot and never logged with content.</div>
+      <div id="sttStreamingHelp" class="form-text">Off by default. With streaming off, the Muse streaming provider uses the one-shot path. Partial transcripts are never sent to the robot and never logged with content.</div>
     </div>
     <div class="mb-3 form-check">
       <input type="checkbox" class="form-check-input" name="stt_diarization_enabled" id="stt_diarization_enabled" aria-describedby="sttDiarizationHelp"{% if object.stt_diarization_enabled %} checked{% endif %}>
       <label class="form-check-label" for="stt_diarization_enabled">Enable speaker diarization (streaming only)</label>
-      <div id="sttDiarizationHelp" class="form-text text-light">Diarization is OFF by default for privacy. Speaker labels are not logged or stored, even when this is on.</div>
+      <div id="sttDiarizationHelp" class="form-text">Diarization is OFF by default for privacy. Speaker labels are not logged or stored, even when this is on.</div>
     </div>
     <div class="mb-3">
-      <label for="stt_endpointing_mode" class="form-label fw-bold fs-5">Streaming Endpointing</label>
+      <label for="stt_endpointing_mode" class="form-label">Streaming Endpointing</label>
       <select class="form-control" name="stt_endpointing_mode" id="stt_endpointing_mode" aria-describedby="sttEndpointingHelp">
         <option value="auto"{% if not object.stt_endpointing_mode or object.stt_endpointing_mode == 'auto' %} selected{% endif %}>auto — provider decides, server timeout backstop</option>
         <option value="server_timeout"{% if object.stt_endpointing_mode == 'server_timeout' %} selected{% endif %}>server_timeout — server ends turn after timeout</option>
         <option value="disabled"{% if object.stt_endpointing_mode == 'disabled' %} selected{% endif %}>disabled — only provider final / end-of-speech</option>
       </select>
-      <div id="sttEndpointingHelp" class="form-text text-light">auto: provider endpoint events end the turn, with the server timeout below as a backstop. server_timeout: the server promotes the last partial to final after the timeout with no new audio/messages. disabled: never time out server-side; only a provider final or the robot's end-of-speech ends the turn.</div>
+      <div id="sttEndpointingHelp" class="form-text">auto: provider endpoint events end the turn, with the server timeout below as a backstop. server_timeout: the server promotes the last partial to final after the timeout with no new audio/messages. disabled: never time out server-side; only a provider final or the robot's end-of-speech ends the turn.</div>
     </div>
     <div class="mb-3">
-      <label for="stt_endpointing_timeout_ms" class="form-label fw-bold fs-5">Endpointing Timeout (ms)</label>
-      <input type="number" class="form-control" name="stt_endpointing_timeout_ms" id="stt_endpointing_timeout_ms" min="200" max="5000" step="100" aria-describedby="sttTimeoutHelp" value="{{object.stt_endpointing_timeout_ms|default:1000}}">
-      <div id="sttTimeoutHelp" class="form-text text-light">Silence backstop for auto/server_timeout endpointing (200–5000 ms, default 1000). Values outside the range are clamped on save.</div>
+      <label for="stt_endpointing_timeout_ms" class="form-label">Endpointing Timeout (ms)</label>
+      <input type="number" class="form-control" name="stt_endpointing_timeout_ms" id="stt_endpointing_timeout_ms" min="200" max="5000" step="100" aria-describedby="sttTimeoutHelp" value="{{ object.stt_endpointing_timeout_ms|default:1000 }}">
+      <div id="sttTimeoutHelp" class="form-text">Silence backstop for auto/server_timeout endpointing (200–5000 ms, default 1000). Values outside the range are clamped on save.</div>
     </div>
     <div class="mb-3">
-      <label for="stt_language_hint" class="form-label fw-bold fs-5">STT Language Hint</label>
+      <label for="stt_language_hint" class="form-label">STT Language Hint</label>
       <select class="form-control" name="stt_language_hint" id="stt_language_hint" aria-describedby="sttLanguageHelp">
         <option value="auto"{% if not object.stt_language_hint or object.stt_language_hint == 'auto' %} selected{% endif %}>auto — detect language</option>
         <option value="en"{% if object.stt_language_hint == 'en' %} selected{% endif %}>en — English</option>
@@ -127,61 +133,64 @@
         <option value="fi"{% if object.stt_language_hint == 'fi' %} selected{% endif %}>fi — Finnish</option>
         <option value="no"{% if object.stt_language_hint == 'no' %} selected{% endif %}>no — Norwegian</option>
       </select>
-      <div id="sttLanguageHelp" class="form-text text-light">Auto by default. A specific code is sent only as a hint; auto lets the provider detect the language.</div>
+      <div id="sttLanguageHelp" class="form-text">Auto by default. A specific code is sent only as a hint; auto lets the provider detect the language.</div>
     </div>
     <div class="mb-3">
-      <label for="stt_keyword_bias" class="form-label fw-bold fs-5">Keyword Bias (comma-separated)</label>
-      <input type="text" class="form-control" name="stt_keyword_bias" id="stt_keyword_bias" aria-describedby="sttKeywordHelp" value="{{object.stt_keyword_bias}}" placeholder="e.g. Moxie, names, favourite words">
-      <div id="sttKeywordHelp" class="form-text text-light">Optional names/words to bias recognition toward (max 20, letters/digits/space/hyphen/apostrophe). Stored locally and sent only as biasing hints to the streaming session.</div>
+      <label for="stt_keyword_bias" class="form-label">Keyword Bias (comma-separated)</label>
+      <input type="text" class="form-control" name="stt_keyword_bias" id="stt_keyword_bias" aria-describedby="sttKeywordHelp" value="{{ object.stt_keyword_bias }}" placeholder="e.g. Moxie, names, favourite words">
+      <div id="sttKeywordHelp" class="form-text">Optional names/words to bias recognition toward (max 20, letters/digits/space/hyphen/apostrophe). Stored locally and sent only as biasing hints to the streaming session.</div>
     </div>
     <div class="mb-3 form-check">
       <input type="checkbox" class="form-check-input" name="stt_code_switching_enabled" id="stt_code_switching_enabled" aria-describedby="sttCodeSwitchHelp"{% if object.stt_code_switching_enabled %} checked{% endif %}>
       <label class="form-check-label" for="stt_code_switching_enabled">Enable code-switching (mixed languages in one utterance)</label>
-      <div id="sttCodeSwitchHelp" class="form-text text-light">Off by default. Turn on only for speakers who mix languages mid-sentence.</div>
+      <div id="sttCodeSwitchHelp" class="form-text">Off by default. Turn on only for speakers who mix languages mid-sentence.</div>
+    </div>
+    </fieldset>
+    <fieldset>
+    <legend>API keys</legend>
+    <div class="mb-3">
+      <label for="apikey" class="form-label">OpenAI API Key</label>
+      <input type="text" class="form-control" name="apikey" id="apikey" aria-describedby="apiHelp" placeholder="{% if object.openai_api_key %}[Key exists and will be kept unless overridden.]{% else %}Paste OpenAI API key.{% endif %}">
+      <div id="apiHelp" class="form-text">This be be stored in your local database and used locally for AI and Speech services.</div>
     </div>
     <div class="mb-3">
-      <label for="musetranscribeapikey" class="form-label fw-bold fs-5">(OPTIONAL) Muse Transcribe API Key Override</label>
+      <label for="musetranscribeapikey" class="form-label">(OPTIONAL) Muse Transcribe API Key Override</label>
       <input type="password" autocomplete="off" class="form-control" name="musetranscribeapikey" id="musetranscribeapikey" aria-describedby="museTranscribeApiHelp" placeholder="{% if object.muse_transcribe_api_key %}[Key exists and will be kept unless overridden.]{% else %}Leave blank to reuse the Muse Spark key.{% endif %}">
-      <div id="museTranscribeApiHelp" class="form-text text-light">Only needed if the Muse Spark key is ever rejected by the Transcribe endpoint. Stored in your local database, used only on this computer for STT. Never sent to the robot.</div>
+      <div id="museTranscribeApiHelp" class="form-text">Only needed if the Muse Spark key is ever rejected by the Transcribe endpoint. Stored in your local database, used only on this computer for STT. Never sent to the robot.</div>
     </div>
     <div class="mb-3">
-      <label for="musesparkapikey" class="form-label fw-bold fs-5">(OPTIONAL) Muse Spark API Key</label>
+      <label for="musesparkapikey" class="form-label">(OPTIONAL) Muse Spark API Key</label>
       <input type="password" autocomplete="off" class="form-control" name="musesparkapikey" id="musesparkapikey" aria-describedby="museSparkApiHelp" placeholder="{% if object.muse_spark_api_key %}[Key exists and will be kept unless overridden.]{% else %}Paste Muse Spark API key.{% endif %}">
-      <div id="museSparkApiHelp" class="form-text text-light">Stored in your local database, used only on this computer for chat. Never sent to the robot.</div>
+      <div id="museSparkApiHelp" class="form-text">Stored in your local database, used only on this computer for chat. Never sent to the robot.</div>
     </div>
     <div class="mb-3">
-      <label for="muse_spark_model" class="form-label fw-bold fs-5">Muse Spark Model</label>
-      <select class="form-control" name="muse_spark_model" id="muse_spark_model" aria-describedby="museSparkModelHelp">
-        <option value="muse-spark-1.3"{% if not object.muse_spark_model or object.muse_spark_model == 'muse-spark-1.3' %} selected{% endif %}>muse-spark-1.3 (standard)</option>
-        <option value="muse-spark-1.3-contributor"{% if object.muse_spark_model == 'muse-spark-1.3-contributor' %} selected{% endif %}>muse-spark-1.3-contributor</option>
-      </select>
-      <div id="museSparkModelHelp" class="form-text text-light">The contributor variant operates under different data-use terms than the standard Muse Spark model, so conversation content sent to it is handled under those contributor terms rather than the standard terms — stay on muse-spark-1.3 (or GPT) unless you have read and accepted the contributor terms.</div>
+      <label for="googleapikey" class="form-label">(OPTIONAL) Google Service Account Key</label>
+      <input type="text" class="form-control" name="googleapikey" id="googleapikey" aria-describedby="googleapiHelp" placeholder="{% if object.google_api_key %}[Key exists and will be kept unless overridden.]{% else %}Paste Google Service Account key.{% endif %}">
+      <div id="googleapiHelp" class="form-text">
+        This be be stored in your local database and provided to connecting Moxie.
+      </div>
     </div>
-    <div class="mb-3 form-text text-light" id="provider_status">
+    <div class="mb-3" id="provider_status">
       OpenAI: {% if object.openai_api_key %}key configured{% else %}key not configured{% endif %} ·
       Muse Spark: {% if object.muse_spark_api_key %}key configured{% else %}key not configured{% endif %} ·
       STT: {% if object.stt_provider == 'muse_streaming' %}Muse streaming ({% if object.stt_streaming_enabled %}streaming on{% else %}streaming off → one-shot{% endif %}, Whisper fallback){% elif object.stt_provider == 'muse_transcribe' %}Muse Transcribe (Whisper fallback){% else %}Whisper (OpenAI key){% endif %}
     </div>
+    </fieldset>
+    <fieldset>
+    <legend>Host &amp; administrator</legend>
     <div class="mb-3">
-      <label for="googleapikey" class="form-label fw-bold fs-5">(OPTIONAL) Google Service Account Key</label>
-      <input type="text" class="form-control" name="googleapikey" id="googleapikey" aria-describedby="googleapiHelp" placeholder="{% if object.google_api_key %}[Key exists and will be kept unless overridden.]{% else %}Paste Google Service Account key.{% endif %}">
-      <div id="googleapiHelp" class="form-text text-light">
-        This be be stored in your local database and provided to connecting Moxie.
-      </div>
-    </div>
-    <div class="mb-3">
-      <label for="hostname" class="form-label fw-bold fs-5">Hostname</label>
-      <div class="half text-bg-warning p-3" style="margin-bottom: 5px;">
-        <strong>Important! </strong>Hostname is the address Moxie will use to talk to your PC.  It is best to use your computer name, 
+      <label for="hostname" class="form-label">Hostname</label>
+      <div class="alert alert-warning" role="alert">
+        <strong>Important! </strong>Hostname is the address Moxie will use to talk to your PC. It is best to use your computer name,
         but if your router does not provide LAN DNS services, you may need to use your LAN IP address here.
       </div>
-      <input type="text" class="form-control" name="hostname" id="hostname" aria-describedby="hostnameHelp" placeholder="Enter computer name" value="{{object.external_host}}">
-      <div id="hostnameHelp" class="form-text text-light">The local network name of this computer, either your computer name or LAN network address.</div>
+      <input type="text" class="form-control" name="hostname" id="hostname" aria-describedby="hostnameHelp" placeholder="Enter computer name" value="{{ object.external_host }}">
+      <div id="hostnameHelp" class="form-text">The local network name of this computer, either your computer name or LAN network address.</div>
     </div>
     {% if needs_admin %}
     <h3>Database Administrator</h3>
-    <p>Setup the local database administrator password.  This is the superuser password for your local SQLite database and is used when accessing the Admin page for this project.</p>
-    <div class="half text-bg-warning p-3" style="margin-bottom: 5px;">
+    <p>Setup the local database administrator password. This is the superuser password for your local SQLite database and is used when accessing the Admin page for this project.</p>
+    <div class="alert alert-warning" role="alert">
       <strong>Important! </strong>You will need this password to access the Admin section later!
     </div>
     <div class="row mb-3">
@@ -197,27 +206,38 @@
       </div>
     </div>
     {% endif %}
+    </fieldset>
 <!--
     <div class="mb-3 form-check">
       <input type="checkbox" class="form-check-input" name="allowall" id="allowall" aria-describedby="allowHelp">
       <label class="form-check-label" for="allowall">Allow Services to Any Moxie</label>
-      <div id="hostnameHelp" class="form-text text-light">Check this to allow use by any Moxie on your network, otherwise each will need to be authorized explicity.</div>
+      <div id="hostnameHelp" class="form-text">Check this to allow use by any Moxie on your network, otherwise each will need to be authorized explicity.</div>
     </div>
  -->
     <button type="submit" class="btn btn-primary">Submit</button>
   </form>
-</div>
 <script>
-$(document).ready(function() {
-  $('#hive_edit').submit(function(event) {
+/* Vanilla replacement for the previous jQuery submit validation.
+   Same checks, same messages, same confirm prompts as stock. */
+(function () {
+  function isValidJSON(jsonString) {
+    try { JSON.parse(jsonString); } catch (e) { return false; }
+    return true;
+  }
+  var form = document.getElementById('hive_edit');
+  if (!form) { return; }
+  form.addEventListener('submit', function (event) {
     var validated = true;
     var err_msg = "Setup Cannot Complete:";
-
-    var hostname = $('#hostname').val().trim();
-    var googleApiKey = $('#googleapikey').val().trim();
+    var hostnameEl = document.getElementById('hostname');
+    var hostname = hostnameEl ? hostnameEl.value.trim() : '';
+    var googleEl = document.getElementById('googleapikey');
+    var googleApiKey = googleEl ? googleEl.value.trim() : '';
     {% if needs_admin %}
-    var adminUser = $('#adminUser').val().trim();
-    var adminPassword = $('#adminPassword').val().trim();
+    var adminUserEl = document.getElementById('adminUser');
+    var adminPasswordEl = document.getElementById('adminPassword');
+    var adminUser = adminUserEl ? adminUserEl.value.trim() : '';
+    var adminPassword = adminPasswordEl ? adminPasswordEl.value.trim() : '';
     if (adminUser === '') {
       err_msg += '\n-Admin User cannot be empty';
       validated = false;
@@ -235,8 +255,10 @@ $(document).ready(function() {
       err_msg += '\n-Google API Key must be a valid JSON string';
       validated = false;
     }
-    var chatProvider = $('#chat_provider').val();
-    var museSparkKey = $('#musesparkapikey').val().trim();
+    var chatProviderEl = document.getElementById('chat_provider');
+    var chatProvider = chatProviderEl ? chatProviderEl.value : '';
+    var museSparkEl = document.getElementById('musesparkapikey');
+    var museSparkKey = museSparkEl ? museSparkEl.value.trim() : '';
     var museSparkKeyStored = {% if object.muse_spark_api_key %}true{% else %}false{% endif %};
     if (validated && chatProvider === 'muse_spark' && museSparkKey === '' && !museSparkKeyStored) {
       if (!confirm('Muse Spark is selected but no Muse Spark key is set — chat will speak an error until a key is added. Save anyway?')) {
@@ -244,9 +266,12 @@ $(document).ready(function() {
         return;
       }
     }
-    var sttProvider = $('#stt_provider').val();
-    var sttStreamingEnabled = $('#stt_streaming_enabled').is(':checked');
-    var museTranscribeKey = $('#musetranscribeapikey').val().trim();
+    var sttProviderEl = document.getElementById('stt_provider');
+    var sttProvider = sttProviderEl ? sttProviderEl.value : '';
+    var sttStreamingEl = document.getElementById('stt_streaming_enabled');
+    var sttStreamingEnabled = sttStreamingEl ? sttStreamingEl.checked : false;
+    var museTranscribeEl = document.getElementById('musetranscribeapikey');
+    var museTranscribeKey = museTranscribeEl ? museTranscribeEl.value.trim() : '';
     var museTranscribeKeyStored = {% if object.muse_transcribe_api_key %}true{% else %}false{% endif %};
     if (validated && (sttProvider === 'muse_transcribe' || sttProvider === 'muse_streaming' || sttStreamingEnabled) && museSparkKey === '' && !museSparkKeyStored && museTranscribeKey === '' && !museTranscribeKeyStored) {
       if (!confirm('Muse STT is selected but no Muse key is set — STT will fall back to Whisper until a key is added. Save anyway?')) {
@@ -254,21 +279,11 @@ $(document).ready(function() {
         return;
       }
     }
-
     if (!validated) {
       alert(err_msg);
       event.preventDefault();
     }
   });
-});
-
-function isValidJSON(jsonString) {
-  try {
-    JSON.parse(jsonString);
-  } catch (e) {
-    return false;
-  }
-  return true;
-}
+})();
 </script>
 {% endblock %}

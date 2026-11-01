@@ -1,3 +1,29 @@
+# OpenMoxie — LIVE compose (branch mycroft-modern-ui).
+#
+# LAN ONLY. Do not expose 8001/8883 to the internet: the stock security
+# warning stands (minimal auth, keys stored unencrypted on the host).
+# The firewall in front of this host is the exposure control; these port
+# mappings are intentionally NOT changed to loopback, because the robot
+# itself connects over the LAN. Test servers bind to 127.0.0.1 instead
+# (see the separate test compose outside this branch).
+#
+# Images are branch-pinned (OPENMOXIE_VERSION defaults to this branch
+# name), so building this branch can never overwrite the live :latest
+# images or any other branch's images.
+#
+# Healthchecks are OBSERVABILITY ONLY: they do not gate startup
+# (depends_on has no service_healthy condition), so a flaky broker
+# health probe can never block the server from starting. Check health
+# with `docker ps` / `docker inspect`.
+#
+# Logging still goes to ./local/work (server debug.log, broker
+# mosquitto.log) exactly as before; nothing is shipped off-host.
+#
+# BEFORE ANY MIGRATION / PROMOTION: back up ./local/work/db.sqlite3
+# (and the live certs/keys dir) first. Rollback: stop these containers
+# and restart the previous containers (openmoxie-server-spark-switch /
+# openmoxie-mqtt-spark-switch on 8001/8883); restore the DB backup ONLY
+# on Stefan's explicit direction, never automatically.
 
 services:
 
@@ -8,7 +34,26 @@ services:
       platforms:
           - linux/amd64
           - linux/arm64
-    image: openmoxie/openmoxie-mqtt:${OPENMOXIE_VERSION:-latest}
+    image: openmoxie/openmoxie-mqtt:${OPENMOXIE_VERSION:-mycroft-modern-ui}
+    container_name: openmoxie-mqtt-modern-ui
+    restart: unless-stopped
+    healthcheck:
+      # Broker publishes $SYS topics about every 10s; a TLS subscribe
+      # that receives one proves listener + certs + broker are alive.
+      test: ["CMD", "mosquitto_sub", "--cafile", "/mosquitto/config/keys/ca.crt",
+             "-h", "127.0.0.1", "-p", "8883", "-t", "$$SYS/broker/uptime",
+             "-C", "1", "-W", "15"]
+      interval: 30s
+      timeout: 20s
+      start_period: 40s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          memory: 64M
     ports:
       - "8883:8883"
     volumes:
@@ -21,7 +66,25 @@ services:
       platforms:
           - linux/amd64
           - linux/arm64
-    image: openmoxie/openmoxie-server:${OPENMOXIE_VERSION:-latest}
+    image: openmoxie/openmoxie-server:${OPENMOXIE_VERSION:-mycroft-modern-ui}
+    container_name: openmoxie-server-modern-ui
+    restart: unless-stopped
+    healthcheck:
+      # Root view only reads the config row and redirects; it does not
+      # touch MQTT, so this stays light even while the broker is down.
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/hive/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          memory: 256M
     ports:
       - "8001:8000"
     volumes:

@@ -1,18 +1,41 @@
 <!DOCTYPE html>
-{% load django_bootstrap5 %}
 {% load static %}
-<html>
+<html lang="en">
 <head>
-    <title>Open Moxie Hive Control</title>
-    {% bootstrap_css %}
-    <script src="{% static 'js/jquery.js' %}"></script>
-    <link rel="stylesheet" href="{% static 'hive/style.css' %}">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}OpenMoxie Hive Control{% endblock %}</title>
+    <!-- No third-party hosted assets, no framework: one self-hosted
+         stylesheet. openmoxie/urls.py serves /static/ from STATIC_ROOT
+         (site/static/), so the served copy is static/hive/modern.css;
+         an identical copy lives in the hive app static dir for the
+         staticfiles finder. Either way the UI works on a LAN with no
+         internet. -->
+    <link rel="stylesheet" href="{% static 'hive/modern.css' %}">
     <link rel="icon" type="image/svg+xml" href="{% static 'hive/favicon.svg' %}" sizes="any">
+    <script src="{% static 'js/jquery.js' %}"></script>
 </head>
 <body>
-    <div id="content">
-        {% block content %}{% endblock %}
-    </div>
-    {% bootstrap_javascript %}
+    <a class="skip-link" href="#main">Skip to main content</a>
+    <header class="moxheader">
+        <a href="{% url 'hive:dashboard' %}"><img class="moximage" src="{% static 'hive/openmoxie_logo.svg' %}" alt="OpenMoxie home"></a>
+        <span class="moxword">OpenMoxie</span>
+        <span class="moxversion">{{ moxie_version }}</span>
+    </header>
+    <nav class="site-nav" aria-label="Main">
+        <a href="{% url 'hive:dashboard' %}">Dashboard</a>
+        <a href="{% url 'hive:setup' %}">Setup</a>
+        <a href="{% url 'hive:logs' %}">Logs</a>
+        {% url 'admin:index' as admin_url %}{% if admin_url %}<a href="{{ admin_url }}">Admin</a>{% endif %}
+    </nav>
+    <main id="main">
+        <div id="content">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+    <footer class="site-footer">
+        OpenMoxie runs on your LAN only. Keep ports 8001 and 8883 behind your
+        firewall — never expose them to the internet.
+    </footer>
 </body>
 </html>

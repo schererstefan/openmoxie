@@ -149,6 +149,61 @@ def hive_configure(request):
     get_instance().update_from_database()
     return HttpResponseRedirect(reverse("hive:dashboard"))
 
+
+# MODERN UI — dashboard status cards, derived only from stored DB state and
+# the broker connected list. Nothing is invented: firmware/battery fall back
+# to "Unavailable", sleep/standby only when the stored robot mode says so,
+# and bridge mode is NOT claimed per device (it is an in-process controller
+# state with no HTTP toggle; it defaults to Stock, see mycroft_bridge).
+def _device_status_card(device, live_ids):
+    state = device.state if isinstance(device.state, dict) else {}
+    robot_config = device.robot_config if isinstance(device.robot_config, dict) else {}
+    online = device.device_id in live_ids
+    raw_mode = state.get("mode")
+    mode_text = str(raw_mode) if raw_mode else ""
+    low = mode_text.lower()
+    if online:
+        status_label, status_class = "Online", "online"
+    elif "sleep" in low:
+        status_label, status_class = "Sleep", "sleep"
+    elif "standby" in low:
+        status_label, status_class = "Standby", "standby"
+    else:
+        status_label, status_class = "Offline", "offline"
+    firmware = state.get("robot_firmware_version") or "Unavailable"
+    battery = state.get("battery_level")
+    battery_label = battery if battery is not None and battery != "" else "Unavailable"
+    is_puppet = robot_config.get("moxie_mode") == "TELEHEALTH"
+    wake_enabled = bool(robot_config.get("wake_button_enabled"))
+    return {
+        "pk": device.pk,
+        "name": getattr(device, "name", None) or device.device_id or "Unnamed device",
+        "status_label": status_label,
+        "status_class": status_class,
+        "robot_mode": mode_text or None,
+        "firmware": firmware,
+        "battery": battery_label,
+        "mode_label": "Puppet" if is_puppet else "Stock",
+        "is_paired": bool(getattr(device, "is_paired", False)),
+        "can_wake": bool(wake_enabled and online),
+    }
+
+
+def _chat_status(hive_config):
+    if hive_config is None:
+        return None
+    provider = getattr(hive_config, "chat_provider", None) or "openai"
+    if provider == "muse_spark":
+        return {
+            "provider_label": "Muse Spark (Meta)",
+            "model_label": getattr(hive_config, "muse_spark_model", None) or "muse-spark-1.3",
+        }
+    return {
+        "provider_label": "GPT (OpenAI)",
+        "model_label": "Per-conversation setting",
+    }
+
+
 # DASHBOARD - View and overview of the system
 class DashboardView(generic.TemplateView):
     template_name = "hive/dashboard.html"
@@ -161,10 +216,16 @@ class DashboardView(generic.TemplateView):
         context['recent_devices'] = MoxieDevice.objects.all()
         context['conversations'] = SinglePromptChat.objects.all()
         context['schedules'] = MoxieSchedule.objects.all()
-        context['live'] = get_instance().robot_data().connected_list()
+        live_ids = get_instance().robot_data().connected_list()
+        context['live'] = live_ids
+        context['device_cards'] = [
+            _device_status_card(device, live_ids)
+            for device in context['recent_devices']
+        ]
         # Read-only STT summary (knob values only -- never key values;
         # key presence is a boolean used solely for mode resolution).
         hive_config = HiveConfiguration.objects.filter(name='default').first()
+        context['chat_status'] = _chat_status(hive_config)
         if hive_config:
             has_muse_key = bool(
                 str(getattr(hive_config, 'muse_transcribe_api_key', '') or '').strip()

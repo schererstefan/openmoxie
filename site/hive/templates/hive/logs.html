@@ -1,21 +1,14 @@
 {% extends 'base.html' %}
 {% load static %}
 {% block content %}
-<div class="moxheader"><a href="{% url 'hive:dashboard' %}"><img class="moximage" src="{% static 'hive/openmoxie_logo.svg' %}"></a>OpenMoxie<span class="moxversion">{{moxie_version}}</span></div>
-<style>
-  .log-box { height: 420px; overflow-y: auto; background: #212529; color: #e9ecef; padding: 0.5rem; border-radius: 0.25rem; }
-  .log-line { font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; padding: 0 0.25rem; }
-  .log-ota { background: #664d03; color: #ffecb5; }
-  .log-failure { background: #842029; color: #f8d7da; }
-</style>
-<div class="p-3">
-<h2>Logs</h2>
+<h1>Logs</h1>
 <p>
   Read-only tail of the server log (debug.log, including device logs) and the
   MQTT broker log (mosquitto.log) from the app work directory. Filters apply
-  within the tailed lines &mdash; raise the line count to look further back.
+  within the tailed lines — raise the line count to look further back.
   OTA/BoUpdater lines and failure markers (timeout, 404, checksum, signature,
-  corrupt, failed, unknown ca) are highlighted.
+  corrupt, failed, unknown ca) are highlighted. This page is staff-gated: it
+  requires an admin login, and it never writes to the logs.
 </p>
 <form id="log_filters" method="get" action="{% url 'hive:logs' %}" class="row g-2 align-items-end">
   <div class="col-auto">
@@ -23,29 +16,29 @@
     <select id="filter_file" name="file" class="form-select form-select-sm">
       <option value="">Both logs</option>
       {% for name in allowed_files %}
-      <option value="{{name}}"{% if filters.file == name %} selected{% endif %}>{{name}}</option>
+      <option value="{{ name }}"{% if filters.file == name %} selected{% endif %}>{{ name }}</option>
       {% endfor %}
     </select>
   </div>
   <div class="col-auto">
     <label class="form-label" for="filter_device">Device ID</label>
-    <input id="filter_device" name="device" class="form-control form-control-sm" value="{{filters.device}}">
+    <input id="filter_device" name="device" class="form-control form-control-sm" value="{{ filters.device }}">
   </div>
   <div class="col-auto">
     <label class="form-label" for="filter_tag">Tag</label>
-    <input id="filter_tag" name="tag" class="form-control form-control-sm" placeholder="BoUpdater" value="{{filters.tag}}">
+    <input id="filter_tag" name="tag" class="form-control form-control-sm" placeholder="BoUpdater" value="{{ filters.tag }}">
   </div>
   <div class="col-auto">
     <label class="form-label" for="filter_level">Level</label>
-    <input id="filter_level" name="level" class="form-control form-control-sm" placeholder="ERROR" value="{{filters.level}}">
+    <input id="filter_level" name="level" class="form-control form-control-sm" placeholder="ERROR" value="{{ filters.level }}">
   </div>
   <div class="col-auto">
     <label class="form-label" for="filter_q">Text search</label>
-    <input id="filter_q" name="q" class="form-control form-control-sm" value="{{filters.q}}">
+    <input id="filter_q" name="q" class="form-control form-control-sm" value="{{ filters.q }}">
   </div>
   <div class="col-auto">
     <label class="form-label" for="filter_lines">Lines</label>
-    <input id="filter_lines" name="lines" type="number" min="1" max="2000" class="form-control form-control-sm" value="{{lines_requested}}">
+    <input id="filter_lines" name="lines" type="number" min="1" max="2000" class="form-control form-control-sm" value="{{ lines_requested }}">
   </div>
   <div class="col-auto">
     <button type="submit" class="btn btn-primary btn-sm">Apply</button>
@@ -56,20 +49,19 @@
     <label class="form-check-label" for="auto_refresh">Auto-refresh (5s)</label>
   </div>
 </form>
-<br>
 {% for f in files_data %}
-<h3>{{f.label}}</h3>
+<h2>{{ f.label }}</h2>
 {% if not f.exists %}
-<div class="alert alert-secondary log-missing" data-file="{{f.filename}}">{{f.filename}} not found in the work directory yet.</div>
+<div class="alert alert-secondary log-missing" data-file="{{ f.filename }}">{{ f.filename }} not found in the work directory yet.</div>
+{% elif not f.lines %}
+<p class="empty-state">No log lines matched the current filters for {{ f.filename }}. Clear the filters or raise the line count.</p>
 {% endif %}
-<div class="log-box" data-file="{{f.filename}}">
+<div class="log-box" data-file="{{ f.filename }}" aria-label="Tail of {{ f.filename }}" tabindex="0">
   {% for line in f.lines %}
-  <div class="log-line{% if line.failure %} log-failure{% elif line.ota %} log-ota{% endif %}">{{line.text}}</div>
+  <div class="log-line{% if line.failure %} log-failure{% elif line.ota %} log-ota{% endif %}">{{ line.text }}</div>
   {% endfor %}
 </div>
-<br>
 {% endfor %}
-</div>
 <script>
   (function () {
     var apiUrl = "{% url 'hive:logs_api' %}";

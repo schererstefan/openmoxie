@@ -1,40 +1,111 @@
 {% extends 'base.html' %}
 {% load static %}
 {% block content %}
-<div class="moxheader"><a href="{% url 'hive:dashboard' %}"><img class="moximage" src="{% static 'hive/openmoxie_logo.svg' %}"></a>OpenMoxie<span class="moxversion">{{moxie_version}}</span></div>
 {% if alert %}
-    <div class="alert alert-primary">{{ alert }}</div>
+    <div class="alert alert-primary" role="alert">{{ alert }}</div>
 {% endif %}
-<div class="p-3">
-{% if stt_status %}
-<h2>Speech-to-Text</h2>
-<table class="table table-striped">
-  <tr><th>Provider / effective mode</th><td>{{stt_status.provider}} / {{stt_status.mode}}{% if stt_status.fell_back %} (Whisper fallback — no Muse key){% endif %}</td></tr>
-  <tr><th>Streaming</th><td>{% if stt_status.streaming_enabled %}on{% else %}off{% endif %} · diarization {% if stt_status.diarization_enabled %}on{% else %}off{% endif %} · code-switching {% if stt_status.code_switching_enabled %}on{% else %}off{% endif %}</td></tr>
-  <tr><th>Endpointing / language</th><td>{{stt_status.endpointing_mode}} ({{stt_status.endpointing_timeout_ms}} ms) · language hint: {{stt_status.language_hint}}</td></tr>
-</table>
-<br>
-{% endif %}
-<h2>Devices</h2>
+<h1>Dashboard</h1>
+<p>Robot and service status at a glance. All values below come from this
+server's database and broker connection list — nothing here is sample data.</p>
+
+<section aria-labelledby="status-heading">
+<h2 id="status-heading">Service status</h2>
+<div class="card-grid">
+  <article class="card">
+    <h3>Speech-to-Text</h3>
+    {% if stt_status %}
+    <dl>
+      <dt>Provider / effective mode</dt>
+      <dd>{{ stt_status.provider }} / {{ stt_status.mode }}{% if stt_status.fell_back %} (Whisper fallback — no Muse key){% endif %}</dd>
+      <dt>Streaming</dt>
+      <dd>{% if stt_status.streaming_enabled %}On{% else %}Off{% endif %}</dd>
+      <dt>Diarization</dt>
+      <dd>{% if stt_status.diarization_enabled %}On{% else %}Off{% endif %}</dd>
+      <dt>Code-switching</dt>
+      <dd>{% if stt_status.code_switching_enabled %}On{% else %}Off{% endif %}</dd>
+      <dt>Endpointing / language</dt>
+      <dd>{{ stt_status.endpointing_mode }} ({{ stt_status.endpointing_timeout_ms }} ms) · language hint: {{ stt_status.language_hint }}</dd>
+    </dl>
+    {% else %}
+    <p class="empty-state">No configuration saved yet — open Setup to configure Speech-to-Text.</p>
+    {% endif %}
+    <p><a class="btn btn-secondary btn-sm" href="{% url 'hive:setup' %}">Change in Setup</a></p>
+  </article>
+  <article class="card">
+    <h3>Chat</h3>
+    {% if chat_status %}
+    <dl>
+      <dt>Provider</dt>
+      <dd>{{ chat_status.provider_label }}</dd>
+      <dt>Model</dt>
+      <dd>{{ chat_status.model_label }}</dd>
+    </dl>
+    {% else %}
+    <p class="empty-state">No configuration saved yet — open Setup to configure chat.</p>
+    {% endif %}
+    <p><a class="btn btn-secondary btn-sm" href="{% url 'hive:setup' %}">Change in Setup</a></p>
+  </article>
+</div>
+</section>
+
+<section aria-labelledby="devices-heading">
+<h2 id="devices-heading">Devices</h2>
+<p>
 <a title="Code to show Moxie to move to this service" class="btn btn-primary btn-sm" role="button" href="{% url 'hive:endpoint_qr' %}">Migration QR Code</a>
 <a title="Create QR with WiFI credentials to get Moxie on a new network" class="btn btn-primary btn-sm" role="button" href="{% url 'hive:wifi_edit' %}">Wifi QR Code</a>
 <a title="Configure System" class="btn btn-secondary btn-sm" href="{% url 'hive:setup' %}">Setup</a>
-<a title="Administer Database" class="btn btn-secondary btn-sm" href="{% url 'admin:index' %}">Admin</a>
+{% url 'admin:index' as admin_url %}{% if admin_url %}<a title="Administer Database" class="btn btn-secondary btn-sm" href="{{ admin_url }}">Admin</a>{% endif %}
 <a title="Read-only tail of the server and MQTT broker logs (admin login required)" class="btn btn-secondary btn-sm" href="{% url 'hive:logs' %}">Logs</a>
+</p>
+{% if device_cards %}
+<div class="card-grid">
+  {% for card in device_cards %}
+  <article class="card">
+    <h3><a href="{% url 'hive:moxie' card.pk %}">{{ card.name }}</a></h3>
+    <dl>
+      <dt>Connection</dt>
+      <dd><span class="status-dot status-{{ card.status_class }}" aria-hidden="true"></span>{{ card.status_label }}{% if card.robot_mode %} · robot mode: {{ card.robot_mode }}{% endif %}</dd>
+      <dt>Firmware</dt>
+      <dd>{{ card.firmware }}</dd>
+      <dt>Battery</dt>
+      <dd>{{ card.battery }}</dd>
+      <dt>Mode</dt>
+      <dd>{{ card.mode_label }}</dd>
+      <dt>Pairing</dt>
+      <dd>{% if card.is_paired %}Paired{% else %}Unpaired{% endif %}</dd>
+    </dl>
+    <p>
+      {% if card.can_wake %}<a class="btn btn-success btn-sm" href="{% url 'hive:moxie_wake' card.pk %}">Wake</a>{% endif %}
+      <a title="Modify completed missions or reset content progress" class="btn btn-secondary btn-sm" href="{% url 'hive:moxie_missions' card.pk %}">Missions</a>
+      <a title="Customize Moxie's Face" class="btn btn-secondary btn-sm" href="{% url 'hive:face' card.pk %}">Edit Face</a>
+      <a title="Puppeteer Moxie" class="btn btn-secondary btn-sm" href="{% url 'hive:puppet' card.pk %}">Puppet</a>
+      <a title="View Moxie persistent data." class="btn btn-secondary btn-sm" href="{% url 'hive:moxie_data' card.pk %}">Data</a>
+    </p>
+    <p class="form-text">Bridge mode is an in-process controller state (defaults to Stock) and is not
+    toggled from this dashboard; Puppet is shown when the device's robot
+    configuration selects TELEHEALTH mode.</p>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty-state">No Moxie devices have connected yet. Use Migration QR Code above to point a Moxie at this service.</p>
+{% endif %}
+<div class="table-wrap">
 <table class="table table-striped">
-  <tr><th class="w-25">Status</th><th>Moxie Devices</th><th>Schedule</th><th>Actions</th></tr>
+  <caption>All devices, with schedule and actions</caption>
+  <tr><th scope="col" class="w-25">Status</th><th scope="col">Moxie Devices</th><th scope="col">Schedule</th><th scope="col">Actions</th></tr>
   {% for device in recent_devices %}
   <tr><td>
     {% if device.device_id in live %}
-    <span class="badge text-bg-success">Online</span> {{device.last_connect|timesince}}
+    <span class="badge text-bg-success">Online</span> {{ device.last_connect|timesince }}
     {% else %}
-    <span class="badge text-bg-secondary">Offline</span> {{device.last_disconnect|timesince}}
+    <span class="badge text-bg-secondary">Offline</span> {{ device.last_disconnect|timesince }}
     {% endif %}
-  </td><td><a href="{% url 'hive:moxie' device.pk %}">{{device}}</a>
+  </td><td><a href="{% url 'hive:moxie' device.pk %}">{{ device }}</a>
     {% if not device.is_paired %}
     <span class="badge text-bg-danger">Unpaired</span>
     {% endif %}
-  </td><td>{{device.schedule}}</td>
+  </td><td>{{ device.schedule }}</td>
   <td>
     {% if device.robot_config.wake_button_enabled and device.device_id in live %}
     <a class="btn btn-success btn-sm" href="{% url 'hive:moxie_wake' device.pk %}">Wake</a>
@@ -47,40 +118,62 @@
   </tr>
   {% endfor %}
 </table>
-<br>
-<h2>Content Database</h2>
+</div>
+</section>
+
+<section aria-labelledby="content-db-heading">
+<h2 id="content-db-heading">Content Database</h2>
+<div class="table-wrap">
 <table class="table table-striped">
-  <tr><th>Refresh</th><td>
+  <tr><th scope="row">Refresh</th><td>
     <a title="Reload any database entries modified in the Admin view" class="btn btn-primary btn-sm" role="button" href="{% url 'hive:reload_database' %}">Refresh from DB</a>
   </td></tr>
-  <tr><th>Export</th><td>
+  <tr><th scope="row">Export</th><td>
     <a title="Export some or all of your Moxie content" class="btn btn-primary btn-sm" role="button" href="{% url 'hive:export_content' %}">Export Content</a>
   </td></tr>
-  <tr><th>Import</th><td>
-    <form method="post" enctype="multipart/form-data" action="{% url 'hive:import_review' %}" method="post">
+  <tr><th scope="row">Import</th><td>
+    <form method="post" enctype="multipart/form-data" action="{% url 'hive:import_review' %}">
       {% csrf_token %}
       <div class="form-group">
+        <label for="json_file">Content JSON file to upload</label>
         <input title="Select Content JSON file to Upload" type="file" id="json_file" name="json_file" accept=".json" class="form-control-file">
         <button title="Upload content to review for adding to your own Moxie content" type="submit" class="btn btn-primary btn-sm">Upload for Review</button>
       </div>
     </form>
   </td></tr>
 </table>
-<br>
-<h2>Schedules</h2>
+</div>
+</section>
+
+<section aria-labelledby="schedules-heading">
+<h2 id="schedules-heading">Schedules</h2>
+{% if schedules %}
+<div class="table-wrap">
 <table class="table table-striped">
-  <tr><th>Name</th></tr>
+  <tr><th scope="col">Name</th></tr>
   {% for s in schedules %}
-  <tr><td>{{s.name}}</td></tr>
-  {% endfor %}
-</table>
-<br>
-<h2>Conversations</h2>
-<table class="table table-striped">
-  <tr><th>Name</th><th>Module ID</th><th>Content ID</th><th></th></tr>
-  {% for s in conversations %}
-  <tr><td>{{s}}</td><td>{{s.module_id}}</td><td>{{s.content_id}}</td><td><a href="{% url 'hive:interact' s.pk %}">Interact</a></td></tr>
+  <tr><td>{{ s.name }}</td></tr>
   {% endfor %}
 </table>
 </div>
+{% else %}
+<p class="empty-state">No schedules configured yet.</p>
+{% endif %}
+</section>
+
+<section aria-labelledby="conversations-heading">
+<h2 id="conversations-heading">Conversations</h2>
+{% if conversations %}
+<div class="table-wrap">
+<table class="table table-striped">
+  <tr><th scope="col">Name</th><th scope="col">Module ID</th><th scope="col">Content ID</th><th scope="col"></th></tr>
+  {% for s in conversations %}
+  <tr><td>{{ s }}</td><td>{{ s.module_id }}</td><td>{{ s.content_id }}</td><td><a href="{% url 'hive:interact' s.pk %}">Interact</a></td></tr>
+  {% endfor %}
+</table>
+</div>
+{% else %}
+<p class="empty-state">No conversations configured yet.</p>
+{% endif %}
+</section>
 {% endblock %}
