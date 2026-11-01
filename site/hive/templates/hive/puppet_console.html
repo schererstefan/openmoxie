@@ -1,0 +1,304 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="p-3">
+<div class="alert alert-warning" role="alert">
+<strong>Operator-controlled, not autonomous.</strong> Puppet mode only does what an operator clicks here.
+Nothing runs on its own, sequences never auto-advance and never loop, and Interrupt always wins.
+Staff only, LAN only. This page is a clone/test build: it has not been flipped to the live robot.
+</div>
+<h2>Puppet Console</h2>
+<p><a href="/hive/dashboard">Back to dashboard</a> &middot; <a href="/hive/puppet/{{ object.pk }}">Stock puppet page</a></p>
+
+<h3>Live status</h3>
+<table class="table">
+<tr><th>Name</th><td>{{ object.name }} ({{ object.device_id }})</td></tr>
+<tr><th>Connection</th><td>{% if status.online %}Online{% else %}Offline{% endif %}</td></tr>
+<tr><th>Mode</th><td>{{ status.mode }}</td></tr>
+<tr><th>Puppet state</th><td>{{ status.puppet_state|default:"unavailable" }}</td></tr>
+<tr><th>Battery</th><td>{{ status.battery }}</td></tr>
+<tr><th>Firmware</th><td>{{ status.firmware }}</td></tr>
+<tr><th>Last connect</th><td>{{ status.last_connect }}</td></tr>
+<tr><th>Last disconnect</th><td>{{ status.last_disconnect }}</td></tr>
+<tr><th>Currently running</th><td>{% if activity %}{{ activity.label }} ({{ activity.kind }}){% else %}Nothing running{% endif %}</td></tr>
+<tr><th>Last completed</th><td>{% if last_completed %}{{ last_completed.label }}{% else %}None yet{% endif %}</td></tr>
+<tr><th>Last interrupted</th><td>{% if last_interrupted %}{{ last_interrupted.label }}{% else %}None yet{% endif %}</td></tr>
+</table>
+{% if status.auto_exited_on_disconnect %}
+<div class="alert alert-danger">Puppet mode auto-exited: the robot disconnected while puppet mode was on.</div>
+{% endif %}
+<p>Battery and firmware show "unavailable" when the robot has not reported them in device state; they are never guessed.</p>
+
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="interrupt">
+<button type="submit" class="btn btn-danger btn-lg">Interrupt / Stop (always available)</button>
+</form>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="complete">
+<button type="submit" class="btn btn-secondary">Mark current behaviour complete</button>
+</form>
+
+<h3 class="mt-4">Speak</h3>
+<p>"Mycroft" is rendered as "my croft" in spoken output.</p>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="speak">
+<input name="speech" class="form-control" placeholder="Say something...">
+<label>Mood <select name="mood">{% for mood in inventory.meta.moods %}<option value="{{ mood }}">{{ mood }}</option>{% endfor %}</select></label>
+<label>Intensity <input type="range" min="0" max="1" step="0.1" name="intensity" value="0.5"></label>
+<button type="submit" class="btn btn-primary">Speak</button>
+</form>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="wake_greeting">
+<button type="submit" class="btn btn-secondary">Speak wake greeting for Stefan</button>
+</form>
+
+<h3 class="mt-4">Wake / Sleep / Mode</h3>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="wake">
+<button type="submit" class="btn btn-success">Wake</button>
+</form>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="sleep">
+<button type="submit" class="btn btn-secondary">Sleep</button>
+</form>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="mode">
+<label>Mode
+<select name="mode">
+<option value="stock">Stock</option>
+<option value="puppet">Puppet</option>
+<option value="bridge">Bridge (console-session flag only)</option>
+</select>
+</label>
+<button type="submit" class="btn btn-primary">Set mode</button>
+</form>
+<p><strong>Warning when leaving puppet mode:</strong> choosing Stock or Bridge ends operator puppet control until puppet mode is re-entered. Bridge here is a flag in this console session only; it does not change live bridge routing.</p>
+
+<h3 class="mt-4">Transcript (this session only)</h3>
+<p>Live STT is not forwarded to the web layer in stock code, so this panel records operator-entered notes and spoken output for this session only. It is never written to disk by default. Use Clear to erase it.</p>
+<ul class="list-group">
+{% for entry in transcript %}
+<li class="list-group-item"><span class="badge bg-secondary">{{ entry.role }}</span> {{ entry.text }}</li>
+{% empty %}
+<li class="list-group-item">No transcript entries yet.</li>
+{% endfor %}
+</ul>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="transcript_add">
+<input name="text" class="form-control" placeholder="Operator transcript note...">
+<button type="submit" class="btn btn-secondary">Add transcript note</button>
+</form>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="clear_transcript">
+<button type="submit" class="btn btn-secondary">Clear transcript</button>
+</form>
+
+<h3 class="mt-4">Behaviour browser (from the verified inventory only)</h3>
+<p>Search filters the list in your browser; every button below maps to an inventory entry. One behaviour at a time: a second trigger while one is running is rejected, not queued.</p>
+<label>Search behaviours <input id="behaviour_search" class="form-control" placeholder="Type to filter, e.g. wave, bow, nod..."></label>
+
+<h4>Gesture cues</h4>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="gesture_cue">
+{% for item in inventory.gesture_cues %}
+<button type="submit" name="cue" value="{{ item.name }}" class="btn btn-outline-primary btn-sm m-1" title="{{ item.description }}">{{ item.name }}</button>
+{% endfor %}
+</form>
+
+<h4>Looks</h4>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="look">
+{% for item in inventory.looks %}
+<button type="submit" name="behaviour" value="{{ item.id }}" class="btn btn-outline-primary btn-sm m-1" title="{{ item.id }}">{{ item.name }}</button>
+{% endfor %}
+</form>
+
+<h4>Dances (per-turn opt-in required, online/awake only, 10-60 seconds)</h4>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="dance">
+<label><input type="checkbox" name="dance_opt_in" value="yes"> I opt in to this one dance, for this turn only</label>
+<label>Duration (seconds, clamped 10-60) <input name="duration" value="30"></label>
+<br>
+{% for item in inventory.dances %}
+<button type="submit" name="tree" value="{{ item.id }}" class="btn btn-outline-primary btn-sm m-1" title="{{ item.id }}">{{ item.name }}</button>
+{% endfor %}
+</form>
+
+<h4>Gestures ({{ inventory.counts.gestures }})</h4>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="gesture">
+{% for item in inventory.gestures %}
+<button type="submit" name="behaviour" value="{{ item.id }}" class="btn btn-outline-primary btn-sm m-1 behaviour-button" title="{{ item.id }}">{{ item.name }}</button>
+{% endfor %}
+</form>
+
+<h4>Celebration steps (step manually, one per click)</h4>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="celebration_step">
+{% for item in inventory.celebrations %}
+<button type="submit" name="cue" value="{{ item.name|cut:'Celebration step: ' }}" class="btn btn-outline-primary btn-sm m-1" title="{{ item.description }}">{{ item.name }}</button>
+{% endfor %}
+</form>
+
+<h4>Storytelling (one beat per click)</h4>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="story_beat">
+<input name="text" class="form-control" placeholder="One story beat...">
+<label>Mood <select name="mood">{% for mood in inventory.meta.moods %}<option value="{{ mood }}">{{ mood }}</option>{% endfor %}</select></label>
+<label>Intensity <input type="range" min="0" max="1" step="0.1" name="intensity" value="0.5"></label>
+<label>Gesture cue (optional) <input name="gesture_cue" class="form-control" placeholder="e.g. wave"></label>
+<button type="submit" class="btn btn-primary">Tell this beat</button>
+</form>
+
+<h4>Show-me (Phase A only, text descriptions, no storage)</h4>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="show_me_start">
+<button type="submit" class="btn btn-primary">Start show-me</button>
+</form>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="show_me_describe">
+<input name="description" class="form-control" placeholder="What was shown, in words (no photo is taken)...">
+<button type="submit" class="btn btn-secondary">Describe what was shown</button>
+</form>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="show_me_ack">
+<button type="submit" class="btn btn-secondary">Acknowledge and end show-me</button>
+</form>
+
+<h3 class="mt-4">Sequence builder (operator clicks every step)</h3>
+<p>Tick steps in order, then click Run step for each step, one at a time. A step runs only after the previous step is marked complete or interrupted. Stop clears the sequence. Sequences never loop and never run on their own.</p>
+<p>Current sequence: {% if sequence.steps %}{{ sequence.steps|join:", " }} (step {{ sequence.index }} of {{ sequence.steps|length }}, {{ sequence.status }}){% else %}None set.{% endif %}</p>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="sequence_set">
+<input name="steps_text" class="form-control" placeholder="Or type step ids, comma-separated, e.g. gesture:bht_bow, look:bht_search, cue:wave">
+<label><input type="checkbox" name="dance_opt_in" value="yes"> Opt in to any dance step in this sequence (per-sequence opt-in)</label>
+<br>
+{% for item in inventory.gesture_cues %}
+{% if item.name != 'sleep' %}<label class="m-1"><input type="checkbox" name="steps" value="{{ item.id }}"> {{ item.id }}</label>{% endif %}
+{% endfor %}
+{% for item in inventory.looks %}<label class="m-1"><input type="checkbox" name="steps" value="look:{{ item.id }}"> look:{{ item.id }}</label>{% endfor %}
+{% for item in inventory.dances %}<label class="m-1"><input type="checkbox" name="steps" value="dance:{{ item.id }}"> dance:{{ item.id }}</label>{% endfor %}
+{% for item in inventory.celebrations %}<label class="m-1"><input type="checkbox" name="steps" value="{{ item.id }}"> {{ item.id }}</label>{% endfor %}
+<button type="submit" class="btn btn-primary">Set sequence</button>
+</form>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="sequence_step">
+<button type="submit" class="btn btn-primary">Run next step (one click, one step)</button>
+</form>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="sequence_stop">
+<button type="submit" class="btn btn-danger">Stop and clear sequence</button>
+</form>
+<p>Any gesture tree can be a sequence step: type its step id (for example gesture:bht_bow) in the text field above. The checkbox list covers cues, looks, dances and celebration steps directly.</p>
+
+<h4>Favourites / Recent (session only, never robot state)</h4>
+<p>Favourites: {% if favourites %}{{ favourites|join:", " }}{% else %}None yet.{% endif %}</p>
+<p>Recent: {% if recent %}{{ recent|join:", " }}{% else %}None yet.{% endif %}</p>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="favourite">
+<input name="item" class="form-control" placeholder="Favourite an item id, e.g. gesture:bht_bow">
+<button type="submit" class="btn btn-secondary">Add favourite</button>
+</form>
+
+<h3 class="mt-4">Vision Events (event, not an image)</h3>
+<p>The robot has a 5MP forehead camera for gaze/face tracking, but OpenMoxie exposes detection events only. This panel lists events with timestamp, event name, and value where the API provides one. It never shows a picture.</p>
+<p><strong>Live forwarding status: not yet built.</strong> No server code forwards robot vision events to the web layer today, so live robot events will not appear here until that forwarding is built and verified. Entries below come only from console ingest (or a future forwarder calling the same record function). Mocked events are never presented as live.</p>
+<table class="table">
+<tr><th>Time (UTC)</th><th>Event</th><th>Value</th><th>Source</th></tr>
+{% for event in vision_events %}
+<tr><td>{{ event.timestamp }}</td><td>{{ event.event }} ({{ event.name }})</td><td>{{ event.value|default:"(no value)" }}</td><td>{{ event.source }}</td></tr>
+{% empty %}
+<tr><td colspan="4">No vision events recorded in this session.</td></tr>
+{% endfor %}
+</table>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="vision_event">
+<label>Event <select name="event">{% for key, info in vision_events_info.items %}<option value="{{ key }}">{{ key }}: {{ info.0 }}</option>{% endfor %}</select></label>
+<input name="value" class="form-control" placeholder="Value, e.g. book name, aruco code, QR string (blank for face events)">
+<button type="submit" class="btn btn-secondary">Record vision event (ingest plumbing)</button>
+</form>
+
+<h4>Detector controls</h4>
+<p>Detectors are RemoteModule execute actions with event subscriptions, not telehealth commands. Enabling a detector subscribes to its events so detections surface as events, not as speech input. A detector stays active only until one item of its type is detected; re-enable to keep detecting. Payloads are built here; live robot delivery via the remote_chat response path is <strong>unverified</strong> and is not claimed.</p>
+{% for key, info in detectors_info.items %}
+<form method="post" action="/hive/puppet_console/{{ object.pk }}" class="mt-2">
+{% csrf_token %}
+<input type="hidden" name="action" value="detector">
+<input type="hidden" name="detector" value="{{ key }}">
+<p>{{ info.2 }} ({{ info.0 }}) &mdash; currently requested: {% if key in detectors %}enabled{% else %}not enabled{% endif %} &mdash; {{ info.3 }}</p>
+<button type="submit" name="enabled" value="true" class="btn btn-primary btn-sm">Enable {{ info.2 }}</button>
+<button type="submit" name="enabled" value="false" class="btn btn-secondary btn-sm">Disable {{ info.2 }}</button>
+</form>
+{% endfor %}
+<p>Experimental custom face search (eb_custom_face_search) is inventoried in the checkpoint but not offered as a control, because the doc says only two of its five parameters actually work.</p>
+
+<h3 class="mt-4">Camera feed: not available</h3>
+<p><strong>Camera feed: not available.</strong> The hardware camera exists, OpenMoxie exposes detection events only, and no frame transport exists in the server code. A real feed would need a new robot-side image transport. No picture, placeholder image, or simulated feed is shown here, on purpose.</p>
+
+<h3 class="mt-4">Not available on this page (honest list)</h3>
+<ul>
+{% for title, text in absent %}
+<li><strong>{{ title }}:</strong> {{ text }}</li>
+{% endfor %}
+</ul>
+
+<h3 class="mt-4">State timeline</h3>
+<p>Connect/disconnect times come from the device record; mode changes and interrupts are recorded in the session transcript above. The log tail below is filtered to this robot.</p>
+
+<h3 class="mt-4">Log tail (this robot only, staff-gated, read-only)</h3>
+{% for logfile in logs %}
+<h5>{{ logfile.filename }}</h5>
+<pre>{% for line in logfile.lines %}{{ line }}
+{% endfor %}</pre>
+{% empty %}
+<p>No log lines available.</p>
+{% endfor %}
+
+<h3 class="mt-4">Reminder (record only)</h3>
+<p>Reminders here are records only: no timer, no delivery, nothing sent to the robot.</p>
+<form method="post" action="/hive/puppet_console/{{ object.pk }}">
+{% csrf_token %}
+<input type="hidden" name="action" value="reminder">
+<input name="text" class="form-control" placeholder="Reminder text...">
+<input name="due_label" class="form-control" placeholder="Due label (optional)...">
+<button type="submit" class="btn btn-secondary">Record reminder</button>
+</form>
+<ul>
+{% for reminder in reminders %}
+<li>{{ reminder.text }} ({{ reminder.due_label }}) &mdash; delivered: {{ reminder.delivered }}</li>
+{% endfor %}
+</ul>
+
+</div>
+<script>
+document.getElementById('behaviour_search').addEventListener('input', function (e) {
+  var q = e.target.value.toLowerCase();
+  document.querySelectorAll('.behaviour-button').forEach(function (btn) {
+    var hay = (btn.textContent + ' ' + (btn.getAttribute('title') || '')).toLowerCase();
+    btn.style.display = hay.indexOf(q) === -1 ? 'none' : '';
+  });
+});
+</script>
+{% endblock %}

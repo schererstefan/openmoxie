@@ -15,6 +15,7 @@ from PIL import Image
 from io import BytesIO
 
 from . import logtail
+from .puppet_console import puppet_console_api, puppet_console_page
 from .models import CHAT_PROVIDER_MUSE_SPARK, CHAT_PROVIDER_OPENAI, MUSE_SPARK_MODELS, GlobalResponse, SinglePromptChat, MoxieDevice, MoxieSchedule, HiveConfiguration, MentorBehavior
 from .content.data import DM_MISSION_CONTENT_IDS, get_moxie_customization_groups
 from .data_import import update_import_status, import_content
